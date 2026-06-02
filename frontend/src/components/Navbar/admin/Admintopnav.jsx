@@ -1,6 +1,6 @@
 import { Bell, Search } from "lucide-react";
 
-export default function Topnav() {
+export default function Admintopnav() {
   return (
     <header className="h-16 border-b border-slate-200 bg-white px-8 flex items-center justify-between">
       {/* Search */}

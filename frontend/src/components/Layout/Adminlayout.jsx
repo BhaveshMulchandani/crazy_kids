@@ -1,6 +1,6 @@
 import { Outlet } from "react-router-dom";
-import Topnav from "../Navbar/Topnav";
-import Sidenav from "../Navbar/Sidenav";
+import Topnav from "../Navbar/admin/Admintopnav";
+import Sidenav from "../Navbar/admin/Adminsidenav";
 
 const Layout = () => {
   return (

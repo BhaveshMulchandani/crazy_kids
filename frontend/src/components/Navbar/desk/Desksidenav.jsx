@@ -25,7 +25,7 @@ const navItems = [
   { label: "Settings", icon: Settings, path: "/settings" },
 ];
 
-export default function Sidenav() {
+export default function Desksidenav() {
   return (
     <aside className="w-64 min-h-screen bg-slate-950 text-white flex flex-col">
       {/* Logo */}

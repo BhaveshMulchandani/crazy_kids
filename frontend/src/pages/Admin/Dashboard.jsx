@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StatCard } from "../components/stat-card";
+import { StatCard } from "../../components/stat-card";
 import {
   Receipt,
   IndianRupee,
