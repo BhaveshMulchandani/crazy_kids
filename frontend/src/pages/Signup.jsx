@@ -1,13 +1,27 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
+import axios from "axios"
+import { useNavigate } from "react-router-dom";
+
 
 export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleSubmit = (event) => {
+  const navigate = useNavigate()
+
+  const handleSubmit = async (event) => {
     event.preventDefault();
+
+    const response = await axios.post("http://localhost:3000/users/register",{email,password})
+
+    if(response.status === 201){
+      navigate("/")
+    }
+
+    setEmail("")
+    setPassword("")
   };
 
   return (

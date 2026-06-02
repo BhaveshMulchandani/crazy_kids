@@ -1,4 +1,6 @@
 const usermodel = require("../models/user.model")
+const bcrypt = require("bcryptjs")
+const jwt = require("jsonwebtoken")
 
 const register = async (req, res) => {
 
@@ -10,16 +12,16 @@ const register = async (req, res) => {
             return res.status(400).json({ message: "Please fill all the fields" })
         }
 
-        const user = await usermodel.findOne({ email })
+        const existinguser = await usermodel.findOne({ email })
 
-        if (user) {
+        if (existinguser) {
             return res.status(400).json({ message: "User already exists" })
         }
 
         const salt = await bcrypt.genSalt(10)
         const hashpassword = await bcrypt.hash(password, salt)
 
-        const user = new usermodel.create({
+        const user = await usermodel.create({
             email,
             password: hashpassword
         })

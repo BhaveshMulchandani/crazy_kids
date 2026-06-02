@@ -1,13 +1,40 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import axios from "axios";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleSubmit = (event) => {
+  const navigate = useNavigate();
+
+  const handleSubmit = async (event) => {
     event.preventDefault();
+
+    const response = await axios.post("http://localhost:3000/users/login", {
+      email,
+      password,
+    });
+
+    if (!email || !password) {
+      alert("Please fill all the fields");
+      return;
+    }
+
+    if (response.status !== 200) {
+      alert("Invalid email or password");
+    }
+
+    if (response.status === 200 && response.data.user.role === "desk") {
+      navigate("/desk/billing");
+    }
+
+    if (response.status === 200 && response.data.user.role === "admin") {
+      navigate("/admin/dashboard");
+    }
+
+    localStorage.setItem("user", JSON.stringify(response.data.user));
   };
 
   return (
@@ -55,9 +82,7 @@ export default function Login() {
             </div>
           </div>
 
-          <p className="text-xs text-slate-400">
-            © Crazy Kids
-          </p>
+          <p className="text-xs text-slate-400">© Crazy Kids</p>
         </div>
       </div>
 
@@ -67,7 +92,9 @@ export default function Login() {
           <div className="mb-8">
             <h2 className="text-3xl font-semibold">Desk login</h2>
 
-            <p className="mt-2 text-sm text-slate-500">Sign in to your console.</p>
+            <p className="mt-2 text-sm text-slate-500">
+              Sign in to your console.
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -116,21 +143,22 @@ export default function Login() {
             <button
               type="submit"
               className="flex h-12 w-full items-center justify-center rounded-2xl bg-slate-950 text-white font-medium transition hover:bg-slate-800"
-            >Sign in
+            >
+              Sign in
             </button>
           </form>
 
           {/* Toggle */}
           <div className="mt-6 text-center text-sm text-slate-500">
-              <>
-                No account yet?{" "}
-                <Link
-                  to="/signup"
-                  className="font-medium text-slate-950 underline-offset-4 hover:underline"
-                >
-                  Create one
-                </Link>
-              </>
+            <>
+              No account yet?{" "}
+              <Link
+                to="/signup"
+                className="font-medium text-slate-950 underline-offset-4 hover:underline"
+              >
+                Create one
+              </Link>
+            </>
           </div>
         </div>
       </div>

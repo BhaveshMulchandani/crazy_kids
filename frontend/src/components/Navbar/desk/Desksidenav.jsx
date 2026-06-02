@@ -1,31 +1,38 @@
 import {
-  LayoutDashboard,
   Receipt,
-  Coffee,
-  Users,
-  Tag,
   Timer,
-  MessageCircle,
-  Settings,
   UtensilsCrossed,
   Sparkles,
+  Coffee
 } from "lucide-react";
 
-import { NavLink } from "react-router-dom";
+import { NavLink,useNavigate } from "react-router-dom";
+import axios from "axios";
 
 const navItems = [
-  { label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
-  { label: "Billing", icon: Receipt, path: "/billing" },
-  { label: "Sessions", icon: Timer, path: "/sessions" },
-  { label: "Cafe POS", icon: Coffee, path: "/cafepos" },
-  { label: "Cafe Menu", icon: UtensilsCrossed, path: "/cafemenu" },
-  { label: "Customers", icon: Users, path: "/customers" },
-  { label: "Offers", icon: Tag, path: "/offers" },
-  { label: "WhatsApp", icon: MessageCircle, path: "/whatsapp" },
-  { label: "Settings", icon: Settings, path: "/settings" },
+  { label: "Billing", icon: Receipt, path: "/desk/billing" },
+  { label: "Cafe POS", icon: Coffee, path: "/desk/cafepos" },
+  { label: "Sessions", icon: Timer, path: "/desk/sessions" },
+  { label: "Cafe Menu", icon: UtensilsCrossed, path: "/desk/cafemenu" },
 ];
 
 export default function Desksidenav() {
+
+   const navigate = useNavigate();
+
+  const handlelogout = async () => {
+    let response = await axios.post("http://localhost:3000/users/logout", {
+      withCredentials: true,
+    });
+
+    if (response.status === 200) {
+      navigate("/");
+    }
+
+    localStorage.removeItem("user");
+  };
+
+  const user = JSON.parse(localStorage.getItem("user"));
   return (
     <aside className="w-64 min-h-screen bg-slate-950 text-white flex flex-col">
       {/* Logo */}
@@ -71,9 +78,9 @@ export default function Desksidenav() {
         <div className="rounded-xl bg-white/5 p-3">
           <p className="text-xs text-white/50">Signed in as</p>
 
-          <p className="truncate text-sm font-medium">admin@example.com</p>
+          <p className="truncate text-sm font-medium">{user?.email}</p>
 
-          <button className="mt-3 w-full rounded-lg bg-white/10 px-3 py-2 text-sm transition hover:bg-white/20">
+          <button onClick={handlelogout} className="mt-3 w-full rounded-lg bg-white/10 px-3 py-2 text-sm transition hover:bg-white/20">
             Sign out
           </button>
         </div>

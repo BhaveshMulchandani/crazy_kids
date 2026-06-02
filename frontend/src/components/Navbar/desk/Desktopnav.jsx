@@ -1,6 +1,7 @@
 import { Bell, Search } from "lucide-react";
 
 export default function Desktopnav() {
+    const user = JSON.parse(localStorage.getItem("user"));
   return (
     <header className="h-16 border-b border-slate-200 bg-white px-8 flex items-center justify-between">
       {/* Search */}
@@ -21,7 +22,7 @@ export default function Desktopnav() {
         </button>
 
         <div className="grid h-10 w-10 place-items-center rounded-full bg-slate-950 text-sm font-semibold text-white">
-          A
+          {user?.email?.charAt(0)?.toUpperCase() || "D"}
         </div>
       </div>
     </header>
