@@ -1,4 +1,5 @@
 import * as React from "react";
+import axios from "axios";
 import {
   Award,
   Coffee,
@@ -227,13 +228,46 @@ function Cafepos() {
   const [cart, setCart] = React.useState([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [receipt, setReceipt] = React.useState(null);
+  const [menu, setMenu] = React.useState(MOCK_MENU);
+  const [loadingMenu, setLoadingMenu] = React.useState(false);
 
-  const menu = React.useMemo(() => MOCK_MENU.filter((item) => item.available), []);
+  React.useEffect(() => {
+    const fetchMenu = async () => {
+      setLoadingMenu(true);
+      try {
+        const response = await axios.get("http://localhost:3000/menu/getall");
+        const apiMenu = response?.data?.menu;
+        if (Array.isArray(apiMenu)) {
+          setMenu(
+            apiMenu.map((item) => ({
+              id: item._id ?? item.id,
+              name: item.name,
+              price: Number(item.price),
+              category: item.category || "others",
+              image_url: item.image || item.image_url || "",
+              available: item.available ?? true,
+            })),
+          );
+        } else {
+          toast.error("Menu response was invalid");
+        }
+      } catch (error) {
+        console.error("Failed to load menu", error);
+        toast.error("Unable to load menu items");
+      } finally {
+        setLoadingMenu(false);
+      }
+    };
+
+    fetchMenu();
+  }, []);
+
+  const availableMenu = React.useMemo(() => menu.filter((item) => item.available), [menu]);
 
   const filtered = React.useMemo(() => {
     const q = search.toLowerCase();
-    return menu.filter((item) => (cat === "all" || item.category === cat) && (!q || item.name.toLowerCase().includes(q)));
-  }, [menu, search, cat]);
+    return availableMenu.filter((item) => (cat === "all" || item.category === cat) && (!q || item.name.toLowerCase().includes(q)));
+  }, [availableMenu, search, cat]);
 
   const findCustomer = () => {
     const result = findCustomerMock(customerLookup);
@@ -331,7 +365,9 @@ function Cafepos() {
             </div>
           </div>
 
-          {filtered.length === 0 ? (
+          {loadingMenu ? (
+            <div className="text-center text-muted-foreground py-16">Loading menu...</div>
+          ) : filtered.length === 0 ? (
             <div className="text-center text-muted-foreground py-16">No items match.</div>
           ) : (
             <div className="grid grid-cols-4 gap-3">

@@ -15,6 +15,8 @@ export default function Login() {
     const response = await axios.post("http://localhost:3000/users/login", {
       email,
       password,
+    },{
+      withCredentials: true
     });
 
     if (!email || !password) {

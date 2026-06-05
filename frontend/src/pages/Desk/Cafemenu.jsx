@@ -1,4 +1,11 @@
-import * as React from "react";
+import axios from "axios";
+import React, {
+  useCallback,
+  useEffect,
+  useState,
+  useRef,
+  useContext,
+} from "react";
 import {
   Plus,
   Pencil,
@@ -78,10 +85,7 @@ const Label = React.forwardRef(({ className, ...props }, ref) => (
 Label.displayName = "Label";
 
 const Switch = React.forwardRef(
-  (
-    {checked = false, onCheckedChange, disabled, ...props },
-    ref,
-  ) => {
+  ({ checked = false, onCheckedChange, disabled, ...props }, ref) => {
     const handleClick = () => {
       if (disabled) return;
       onCheckedChange?.(!checked);
@@ -123,11 +127,11 @@ const Select = ({
   disabled,
   ...props
 }) => {
-  const [open, setOpen] = React.useState(false);
-  const [items, setItems] = React.useState({});
-  const rootRef = React.useRef(null);
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState({});
+  const rootRef = useRef(null);
 
-  const registerItem = React.useCallback((itemValue, label) => {
+  const registerItem = useCallback((itemValue, label) => {
     setItems((prev) =>
       prev[itemValue] === label ? prev : { ...prev, [itemValue]: label },
     );
@@ -135,7 +139,7 @@ const Select = ({
 
   const valueLabel = value != null ? (items[value] ?? value) : "";
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!open) return;
     const handleClickOutside = (event) => {
       if (rootRef.current && !rootRef.current.contains(event.target)) {
@@ -171,7 +175,7 @@ const Select = ({
 
 const SelectTrigger = React.forwardRef(
   ({ className, children, ...props }, ref) => {
-    const ctx = React.useContext(SelectContext);
+    const ctx = useContext(SelectContext);
     return (
       <button
         type="button"
@@ -193,13 +197,13 @@ const SelectTrigger = React.forwardRef(
 SelectTrigger.displayName = "SelectTrigger";
 
 const SelectValue = ({ placeholder }) => {
-  const ctx = React.useContext(SelectContext);
+  const ctx = useContext(SelectContext);
   return <span>{ctx?.value ? ctx.valueLabel : placeholder}</span>;
 };
 
 const SelectContent = React.forwardRef(
   ({ className, children, ...props }, ref) => {
-    const ctx = React.useContext(SelectContext);
+    const ctx = useContext(SelectContext);
     if (!ctx?.open) return null;
     return (
       <div
@@ -219,10 +223,10 @@ SelectContent.displayName = "SelectContent";
 
 const SelectItem = React.forwardRef(
   ({ className, children, value, ...props }, ref) => {
-    const ctx = React.useContext(SelectContext);
+    const ctx = useContext(SelectContext);
     const label = typeof children === "string" ? children : "";
 
-    React.useEffect(() => {
+    useEffect(() => {
       ctx?.registerItem?.(value, label);
     }, [ctx, value, label]);
 
@@ -266,7 +270,7 @@ const Dialog = ({ open, onOpenChange, children }) => (
 
 const DialogContent = React.forwardRef(
   ({ className, children, ...props }, ref) => {
-    const ctx = React.useContext(DialogContext);
+    const ctx = useContext(DialogContext);
     if (!ctx?.open) return null;
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
@@ -327,57 +331,6 @@ DialogFooter.displayName = "DialogFooter";
 
 const CATS = ["drinks", "snacks", "desserts", "others"];
 
-const DEFAULT_MENU = [
-  {
-    id: "1",
-    name: "Espresso",
-    category: "drinks",
-    price: 120,
-    image_url: "",
-    available: true,
-  },
-  {
-    id: "2",
-    name: "Cappuccino",
-    category: "drinks",
-    price: 150,
-    image_url: "",
-    available: true,
-  },
-  {
-    id: "3",
-    name: "Sandwich",
-    category: "snacks",
-    price: 140,
-    image_url: "",
-    available: true,
-  },
-  {
-    id: "4",
-    name: "French Fries",
-    category: "snacks",
-    price: 110,
-    image_url: "",
-    available: true,
-  },
-  {
-    id: "5",
-    name: "Brownie",
-    category: "desserts",
-    price: 100,
-    image_url: "",
-    available: true,
-  },
-  {
-    id: "6",
-    name: "Cookies",
-    category: "desserts",
-    price: 80,
-    image_url: "",
-    available: false,
-  },
-];
-
 const iconByCategory = {
   drinks: "🥤",
   snacks: "🍟",
@@ -385,26 +338,46 @@ const iconByCategory = {
   others: "🍽️",
 };
 
-function ItemDialog({ open, setOpen, item, onSaved }) {
-  const [form, setForm] = React.useState(item ?? {});
+function ItemDialog({ open, setOpen, item, onSaved, setEditing }) {
+  const [form, setForm] = useState(item ?? {});
 
   if (!item) return null;
 
-  const save = () => {
+  const save = async () => {
     if (!form.name) {
       toast.error("Name required");
       return;
     }
-    onSaved(form);
-    setOpen(false);
-    toast.success("Saved");
+
+    const success = await onSaved({
+      ...form,
+      price: Number(form.price),
+      image: form.image ?? "",
+      category: form.category ?? "drinks",
+      available: form.available ?? true,
+    });
+
+    if (success) {
+      setForm({
+        name: "",
+        category: "drinks",
+        price: 0,
+        image: "",
+        available: true,
+      });
+
+      setOpen(false);
+      setEditing?.(null);
+
+      toast.success("Saved");
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{item.id ? "Edit item" : "Add menu item"}</DialogTitle>
+          <DialogTitle>{item._id ? "Edit item" : "Add menu item"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -451,8 +424,8 @@ function ItemDialog({ open, setOpen, item, onSaved }) {
           <div className="space-y-2">
             <Label>Image URL (optional)</Label>
             <Input
-              value={form.image_url ?? ""}
-              onChange={(e) => setForm({ ...form, image_url: e.target.value })}
+              value={form.image ?? ""}
+              onChange={(e) => setForm({ ...form, image: e.target.value })}
               placeholder="https://..."
             />
           </div>
@@ -469,7 +442,20 @@ function ItemDialog({ open, setOpen, item, onSaved }) {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setForm({
+                name: "",
+                category: "drinks",
+                price: 0,
+                image: "",
+                available: true,
+              });
+              setOpen(false);
+              setEditing?.(null);
+            }}
+          >
             Cancel
           </Button>
           <Button
@@ -485,44 +471,133 @@ function ItemDialog({ open, setOpen, item, onSaved }) {
 }
 
 function Cafemenu() {
-  const [items, setItems] = React.useState(DEFAULT_MENU);
-  const [editing, setEditing] = React.useState(null);
-  const [open, setOpen] = React.useState(false);
+  const [items, setItems] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const fetchMenus = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get("http://localhost:3000/menu/getall");
+      setItems(response.data?.menu ?? []);
+    } catch (error) {
+      console.error(error);
+      toast.error(
+        error?.response?.data?.message || "Unable to load menu items.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      await fetchMenus();
+    };
+
+    load();
+  }, [fetchMenus]);
 
   const newItem = () => {
+    setEditing(null);
+
     setEditing({
       name: "",
       category: "drinks",
       price: 0,
-      image_url: "",
+      image: "",
       available: true,
     });
     setOpen(true);
   };
 
-  const saveItem = (form) => {
-    if (form.id) {
-      setItems((prev) =>
-        prev.map((item) => (item.id === form.id ? { ...item, ...form } : item)),
+  const saveItem = async (form) => {
+    try {
+      if (form._id) {
+        await axios.put(
+          `http://localhost:3000/menu/update/${form._id}`,
+          {
+            name: form.name,
+            category: form.category,
+            price: Number(form.price),
+            image: form.image ?? "",
+            available: Boolean(form.available),
+          },
+          {
+            withCredentials: true,
+          },
+        );
+      } else {
+        const payload = {
+          name: form.name,
+          category: form.category,
+          price: Number(form.price),
+        };
+
+        if (form.image) {
+          payload.image = form.image;
+        }
+
+        await axios.post("http://localhost:3000/menu/create", payload, {
+          withCredentials: true,
+        });
+      }
+      setEditing(null);
+      await fetchMenus();
+      return true;
+    } catch (error) {
+      console.error(error);
+      toast.error(
+        error?.response?.data?.message ||
+          "Unable to save menu item. Please try again.",
       );
-    } else {
-      setItems((prev) => [{ ...form, id: String(Date.now()) }, ...prev]);
+      return false;
     }
   };
 
-  const removeItem = (id) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    toast.success("Item removed");
+  const removeItem = async (_id) => {
+    try {
+      await axios.delete(`http://localhost:3000/menu/delete/${_id}`, {
+        withCredentials: true,
+      });
+      await fetchMenus();
+      toast.success("Item removed");
+    } catch (error) {
+      console.error(error);
+      toast.error(
+        error?.response?.data?.message ||
+          "Unable to remove menu item. Please try again.",
+      );
+    }
   };
 
-  const toggleAvailability = (item) => {
-    setItems((prev) =>
-      prev.map((current) =>
-        current.id === item.id
-          ? { ...current, available: !current.available }
-          : current,
-      ),
-    );
+  const toggleAvailability = async (item) => {
+    try {
+      await axios.put(
+        `http://localhost:3000/menu/update/${item._id}`,
+        {
+          name: item.name,
+          category: item.category,
+          price: Number(item.price),
+          image: item.image ?? "",
+          available: !item.available,
+        },
+        {
+          withCredentials: true,
+        },
+      );
+      await fetchMenus();
+      toast.success(
+        `Item ${!item.available ? "enabled" : "disabled"} successfully`,
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error(
+        error?.response?.data?.message ||
+          "Unable to update availability. Please try again.",
+      );
+    }
   };
 
   return (
@@ -546,84 +621,95 @@ function Cafemenu() {
       </div>
 
       <div className="space-y-6">
-        {CATS.map((catKey) => {
-          const list = items.filter((item) => item.category === catKey);
-          if (list.length === 0) return null;
-          return (
-            <section key={catKey}>
-              <h2 className="text-sm uppercase tracking-wider text-muted-foreground mb-3">
-                {catKey}
-              </h2>
-              <div className="grid grid-cols-4 gap-4">
-                {list.map((item) => (
-                  <div
-                    key={item.id}
-                    className={cn(
-                      "surface-card p-4 group",
-                      !item.available ? "opacity-70 grayscale" : "",
-                    )}
-                  >
-                    <div className="aspect-square rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 grid place-items-center mb-3 text-3xl">
-                      {item.image_url ? (
-                        <img
-                          src={item.image_url}
-                          alt={item.name}
-                          className="w-full h-full object-cover rounded-xl"
-                        />
-                      ) : (
-                        iconByCategory[item.category] || "🍽️"
+        {loading ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-muted-foreground">
+            Loading menu...
+          </div>
+        ) : items.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-muted-foreground">
+            No menu items found.
+          </div>
+        ) : (
+          CATS.map((catKey) => {
+            const list = items.filter((item) => item.category === catKey);
+            if (list.length === 0) return null;
+            return (
+              <section key={catKey}>
+                <h2 className="text-sm uppercase tracking-wider text-muted-foreground mb-3">
+                  {catKey}
+                </h2>
+                <div className="grid grid-cols-4 gap-4">
+                  {list.map((item) => (
+                    <div
+                      key={item._id}
+                      className={cn(
+                        "surface-card p-4 group",
+                        !item.available ? "opacity-70 grayscale" : "",
                       )}
-                    </div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="font-semibold">{item.name}</div>
-                        <div className="text-sm text-primary font-medium">
-                          ₹{Number(item.price)}
-                        </div>
+                    >
+                      <div className="aspect-square rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 grid place-items-center mb-3 text-3xl">
+                        {item.image ? (
+                          <img
+                            src={item.image}
+                            alt={item.name}
+                            className="w-full h-full object-cover rounded-xl"
+                          />
+                        ) : (
+                          iconByCategory[item.category] || "🍽️"
+                        )}
                       </div>
-                      <Switch
-                        checked={item.available}
-                        onCheckedChange={() => toggleAvailability(item)}
-                      />
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-semibold">{item.name}</div>
+                          <div className="text-sm text-primary font-medium">
+                            ₹{Number(item.price)}
+                          </div>
+                        </div>
+                        <Switch
+                          checked={item.available}
+                          onCheckedChange={() => toggleAvailability(item)}
+                        />
+                      </div>
+                      <div className="mt-3 flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          disabled={!item.available}
+                          onClick={() => {
+                            setEditing(item);
+                            setOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-3 w-3 mr-1" /> Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={!item.available}
+                          onClick={() => removeItem(item._id)}
+                        >
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="mt-3 flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        disabled={!item.available}
-                        onClick={() => {
-                          setEditing(item);
-                          setOpen(true);
-                        }}
-                      >
-                        <Pencil className="h-3 w-3 mr-1" /> Edit
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={!item.available}
-                        onClick={() => removeItem(item.id)}
-                      >
-                        <Trash2 className="h-3 w-3 text-destructive" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          );
-        })}
+                  ))}
+                </div>
+              </section>
+            );
+          })
+        )}
       </div>
 
       <ItemDialog
-        key={editing?.id ?? "new"}
+        key={editing?._id ?? "new"}
         open={open}
         setOpen={setOpen}
         item={editing}
         onSaved={saveItem}
+        setEditing={setEditing}
       />
     </div>
   );
