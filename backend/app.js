@@ -4,6 +4,7 @@ const app = express();
 const userroutes = require('./routes/user.routes')
 const menuroutes = require('./routes/menu.routes')
 const offerroutes = require('./routes/offer.routes')
+const priceroutes = require('./routes/prices.routes')
 const cors = require('cors');
 const cookieParser = require("cookie-parser");
 
@@ -23,6 +24,7 @@ app.use(express.json());
 app.use('/users', userroutes);
 app.use('/menu',menuroutes)
 app.use('/offers',offerroutes)
+app.use('/price',priceroutes)
 
 
 

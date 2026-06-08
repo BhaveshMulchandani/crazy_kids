@@ -432,7 +432,7 @@ function Offers() {
   const fetchOffers = React.useCallback(async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE}/offers`, {
+      const response = await axios.get(`${API_BASE}/offers/`, {
         withCredentials: true,
       });
       const serverOffers = Array.isArray(response.data.offers)

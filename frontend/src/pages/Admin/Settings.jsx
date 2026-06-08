@@ -1,5 +1,8 @@
 import * as React from "react";
-import { Save, Settings as SettingsIcon, Timer } from "lucide-react";
+import axios from "axios";
+import { Save, Settings as SettingsIcon, Timer, Coffee, Award } from "lucide-react";
+
+const API_BASE = "http://localhost:3000";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -48,66 +51,124 @@ const Label = React.forwardRef(({ className, ...props }, ref) => (
 ));
 Label.displayName = "Label";
 
-const initialPricing = [
-  { id: "pricing-1", minutes: 30, price: 120, label: "Quick Brew" },
-  { id: "pricing-2", minutes: 60, price: 200, label: "Standard Session" },
-  { id: "pricing-3", minutes: 90, price: 280, label: "Extended Stay" },
-];
+const Field = ({ label, value, onChange }) => (
+  <div>
+    <Label>{label}</Label>
+    <Input className="mt-2" type="number" value={value} onChange={(e) => onChange(e.target.value)} />
+  </div>
+);
 
 function Settings() {
-  const [rows, setRows] = React.useState(initialPricing);
+  const [form, setForm] = React.useState({
+    firstHourUnder3: "",
+    extensionUnder3: "",
+    firstHourAbove3: "",
+    extensionAbove3: "",
+    socksCost: "",
+    loyaltyPointsPer100: "",
+  });
   const [status, setStatus] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
 
-  const updateRow = (index, changes) => {
-    setRows((current) => current.map((row, idx) => (idx === index ? { ...row, ...changes } : row)));
-  };
+  const set = (k, v) => setForm({ ...form, [k]: v });
 
-  const savePricing = () => {
-    setStatus("Pricing saved successfully.");
-    window.setTimeout(() => setStatus(""), 3200);
+  React.useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await axios.get(`${API_BASE}/price/prices`, {
+          withCredentials: true,
+        });
+        const data = response.data;
+        if (data) {
+          setForm({
+            firstHourUnder3: data.firstHourUnder3 ?? "",
+            extensionUnder3: data.extensionUnder3 ?? "",
+            firstHourAbove3: data.firstHourAbove3 ?? "",
+            extensionAbove3: data.extensionAbove3 ?? "",
+            socksCost: data.socksCost ?? "",
+            loyaltyPointsPer100: data.loyaltyPointsPer100 ?? "",
+          });
+        }
+      } catch (error) {
+        setStatus(error?.response?.data?.message || "Unable to load settings.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  const savePricing = async () => {
+    try {
+      const payload = {
+        firstHourUnder3: Number(form.firstHourUnder3),
+        extensionUnder3: Number(form.extensionUnder3),
+        firstHourAbove3: Number(form.firstHourAbove3),
+        extensionAbove3: Number(form.extensionAbove3),
+        socksCost: Number(form.socksCost),
+        loyaltyPointsPer100: Number(form.loyaltyPointsPer100),
+      };
+
+      await axios.put(`${API_BASE}/price/updateprices`, payload, {
+        withCredentials: true,
+      });
+
+      setStatus("Settings saved successfully.");
+      window.setTimeout(() => setStatus(""), 3200);
+    } catch (error) {
+      setStatus(error?.response?.data?.message || "Unable to save settings.");
+    }
   };
 
   return (
     <div className="space-y-6 px-6 py-8">
       <div>
         <h1 className="text-3xl font-semibold flex items-center gap-2"><SettingsIcon className="h-7 w-7 text-primary" /> Settings</h1>
-        <p className="text-muted-foreground mt-1">Operator-level configuration for billing and session pricing.</p>
+        <p className="text-muted-foreground mt-1">Session pricing, socks cost and loyalty rate.</p>
       </div>
 
-      <div className="surface-card rounded-3xl border border-border bg-background p-6 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 text-lg font-semibold">
-            <Timer className="h-5 w-5 text-primary" />
-            Time-based pricing
+      <div className="surface-card rounded-3xl border border-border bg-background p-6 shadow-sm space-y-5">
+        <div className="flex items-center gap-2">
+          <Timer className="h-5 w-5 text-primary" />
+          <h2 className="font-semibold">Session pricing (per child, per age tier)</h2>
+        </div>
+
+        <div className="grid grid-cols-2 gap-5">
+          <Field label="First hour — under 3 years (₹)" value={form.firstHourUnder3} onChange={(v) => set("firstHourUnder3", v)} />
+          <Field label="First hour — 3 years and above (₹)" value={form.firstHourAbove3} onChange={(v) => set("firstHourAbove3", v)} />
+          <Field label="Extension per hour — under 3 years (₹)" value={form.extensionUnder3} onChange={(v) => set("extensionUnder3", v)} />
+          <Field label="Extension per hour — 3 years and above (₹)" value={form.extensionAbove3} onChange={(v) => set("extensionAbove3", v)} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-5 pt-4 border-t border-input">
+          <div>
+            <Label className="flex items-center gap-1.5"><Coffee className="h-3.5 w-3.5" /> Socks cost (₹)</Label>
+            <Input className="mt-2" type="number" value={form.socksCost} onChange={(e) => set("socksCost", e.target.value)} />
           </div>
-          <Button className="mt-2 sm:mt-0" onClick={savePricing}>
-            <Save className="h-4 w-4" />
-            Save pricing
-          </Button>
+          <div>
+            <Label className="flex items-center gap-1.5"><Award className="h-3.5 w-3.5" /> Loyalty points per ₹100</Label>
+            <Input className="mt-2" type="number" value={form.loyaltyPointsPer100} onChange={(e) => set("loyaltyPointsPer100", e.target.value)} />
+          </div>
         </div>
 
-        <p className="text-sm text-muted-foreground mt-3">Adjust the label and price shown on the billing screen for each duration slot.</p>
+        <Button disabled={loading} className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={savePricing}>
+          <Save className="h-4 w-4" />
+          Save settings
+        </Button>
 
-        <div className="mt-6 space-y-4">
-          {rows.map((row, index) => (
-            <div key={row.id} className="grid grid-cols-12 gap-3 items-center rounded-2xl border border-input bg-muted/10 p-4">
-              <div className="col-span-12 sm:col-span-2">
-                <Label className="text-xs">Minutes</Label>
-                <Input value={row.minutes} disabled />
-              </div>
-              <div className="col-span-12 sm:col-span-5">
-                <Label className="text-xs">Label</Label>
-                <Input value={row.label} onChange={(event) => updateRow(index, { label: event.target.value })} placeholder="Session name" />
-              </div>
-              <div className="col-span-12 sm:col-span-5">
-                <Label className="text-xs">Price (₹)</Label>
-                <Input type="number" value={row.price} onChange={(event) => updateRow(index, { price: Number(event.target.value) })} />
-              </div>
-            </div>
-          ))}
-        </div>
+        {loading && <div className="rounded-xl border border-input bg-muted/10 px-4 py-3 text-sm text-muted-foreground">Loading settings...</div>}
+        {status && !loading && <div className="rounded-xl border border-success/50 bg-success/10 px-4 py-3 text-sm text-success">{status}</div>}
+      </div>
 
-        {status && <div className="mt-4 rounded-xl border border-success/50 bg-success/10 px-4 py-3 text-sm text-success">{status}</div>}
+      <div className="surface-card rounded-3xl border border-border bg-background p-6 shadow-sm text-sm text-muted-foreground">
+        <div className="font-medium text-foreground mb-3">How charges are calculated</div>
+        <ul className="list-disc pl-5 space-y-2">
+          <li>Each child is billed individually based on age at check-in (under 3 vs 3+).</li>
+          <li>First hour is always charged. Each additional started hour uses the extension rate.</li>
+          <li>Paused time is excluded from billed minutes.</li>
+          <li>Cafe items added to the same running bill are billed together at checkout.</li>
+        </ul>
       </div>
     </div>
   );
