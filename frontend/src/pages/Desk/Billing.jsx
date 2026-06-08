@@ -1,4 +1,5 @@
 import * as React from "react";
+import axios from "axios";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -347,10 +348,7 @@ const DialogTitle = forwardRef(({ className, ...props }, ref) => (
 DialogTitle.displayName = "DialogTitle";
 
 const SOCKS_COST = 30;
-const MOCK_OFFERS = [
-  { id: "1", name: "Welcome", type: "flat", value: 50, active: true },
-  { id: "2", name: "Summer", type: "percent", value: 10, active: true },
-];
+const API_BASE = "http://localhost:3000";
 const MOCK_PRICING = [
   { id: "p1", minutes: 30, price: 150 },
   { id: "p2", minutes: 60, price: 300 },
@@ -417,7 +415,17 @@ const MOCK_CAFE_ORDERS = [
 const BillingPage = () => {
   const { data: offers = [] } = useQuery({
     queryKey: ["offers", "active"],
-    queryFn: async () => MOCK_OFFERS.filter((o) => o.active),
+    queryFn: async () => {
+      const response = await axios.get(`${API_BASE}/offers/active`, {
+        withCredentials: true,
+      });
+      return Array.isArray(response.data.offers)
+        ? response.data.offers.map((offer) => ({
+            ...offer,
+            id: offer.id || offer._id,
+          }))
+        : [];
+    },
   });
   const { data: pricing = [] } = useQuery({
     queryKey: ["time_pricing"],

@@ -1,5 +1,5 @@
-
 import * as React from "react";
+import axios from "axios";
 import { BadgeIndianRupee, Gift, Percent, Plus, Trash2 } from "lucide-react";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
@@ -57,21 +57,26 @@ const Switch = React.forwardRef(({ className, checked = false, onCheckedChange, 
 
   return (
     <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      ref={ref}
-      disabled={disabled}
-      onClick={handleClick}
-      className={cn(
-        "relative inline-flex h-6 w-12 items-center rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "bg-primary" : "bg-muted/20",
-        className,
-      )}
-      {...props}
-    >
-      <span className={cn("pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow transition-transform", checked ? "translate-x-5" : "translate-x-0")} />
-    </button>
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        ref={ref}
+        disabled={disabled}
+        onClick={handleClick}
+        className={cn(
+          "relative h-6 w-11 rounded-full transition-colors",
+          checked ? "bg-sky-600" : "bg-slate-300",
+          className,
+        )}
+        {...props}
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200",
+            checked && "translate-x-5",
+          )}
+        />
+      </button>
   );
 });
 Switch.displayName = "Switch";
@@ -212,90 +217,305 @@ const DialogFooter = ({ className, ...props }) => (
 );
 DialogFooter.displayName = "DialogFooter";
 
-const initialOffers = [
-  {
-    id: "offer-1",
-    name: "Morning Rush",
-    description: "20% off all hot drinks before 11am",
-    type: "percent",
-    value: 20,
-    active: true,
-  },
-  {
-    id: "offer-2",
-    name: "Combo Treat",
-    description: "Buy one snack + drink at ₹249",
-    type: "combo",
-    value: 249,
-    active: false,
-  },
-  {
-    id: "offer-3",
-    name: "Flat Summer Deal",
-    description: "₹50 off sandwiches and salads",
-    type: "flat",
-    value: 50,
-    active: true,
-  },
-];
+const API_BASE = "http://localhost:3000";
 
 const iconByType = {
-  flat: BadgeIndianRupee,
-  percent: Percent,
-  combo: Gift,
+  membership: Gift,
+  discount: Percent,
+  special_pricing: BadgeIndianRupee,
 };
 
 const typeLabel = {
-  flat: "Flat ₹ off",
-  percent: "% off",
-  combo: "Combo",
+  membership: "Membership",
+  discount: "Percentage Discount",
+  special_pricing: "Special Pricing",
 };
 
+const defaultRulesByType = {
+  membership: {
+    kidsAllowed: 1,
+    playHours: 12,
+    bonusHours: 0,
+    validityMonths: 3,
+    benefits: ["Free Birthday Entry", "Welcome Drink"],
+  },
+  discount: {
+    minKids: 5,
+  },
+  special_pricing: {
+    day: "Wednesday",
+    firstHourPrice: 350,
+    nextHourPrice: 150,
+  },
+};
+
+const offerTypeOptions = [
+  { value: "membership", label: "Membership" },
+  { value: "discount", label: "Percentage Discount" },
+  { value: "special_pricing", label: "Special Pricing" },
+];
+
+const MembershipFields = ({ value, rules, setValue, setRules }) => (
+  <div className="space-y-4">
+    <div>
+      <Label>Membership Price (₹)</Label>
+      <Input
+        type="number"
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        placeholder="4500"
+      />
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div>
+        <Label>Kids Allowed</Label>
+        <Input
+          type="number"
+          value={rules.kidsAllowed}
+          onChange={(event) => setRules({ ...rules, kidsAllowed: Number(event.target.value) })}
+          placeholder="1"
+        />
+      </div>
+      <div>
+        <Label>Play Hours</Label>
+        <Input
+          type="number"
+          value={rules.playHours}
+          onChange={(event) => setRules({ ...rules, playHours: Number(event.target.value) })}
+          placeholder="12"
+        />
+      </div>
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div>
+        <Label>Bonus Hours</Label>
+        <Input
+          type="number"
+          value={rules.bonusHours}
+          onChange={(event) => setRules({ ...rules, bonusHours: Number(event.target.value) })}
+          placeholder="0"
+        />
+      </div>
+      <div>
+        <Label>Validity (Months)</Label>
+        <Input
+          type="number"
+          value={rules.validityMonths}
+          onChange={(event) => setRules({ ...rules, validityMonths: Number(event.target.value) })}
+          placeholder="3"
+        />
+      </div>
+    </div>
+    <div className="space-y-2 rounded-xl border border-input bg-muted/20 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium">Benefits</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setRules({ ...rules, benefits: [...(rules.benefits || []), ""] })}
+        >
+          Add Benefit
+        </Button>
+      </div>
+      <div className="space-y-3">
+        {(rules.benefits || []).map((benefit, index) => (
+          <div key={index} className="flex items-center gap-2">
+            <Input
+              value={benefit}
+              onChange={(event) => {
+                const nextBenefits = [...rules.benefits];
+                nextBenefits[index] = event.target.value;
+                setRules({ ...rules, benefits: nextBenefits });
+              }}
+              placeholder="Free Birthday Entry"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="text-destructive"
+              onClick={() => {
+                const nextBenefits = [...rules.benefits];
+                nextBenefits.splice(index, 1);
+                setRules({ ...rules, benefits: nextBenefits });
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+const DiscountFields = ({ value, rules, setValue, setRules }) => (
+  <div className="grid gap-3 sm:grid-cols-2">
+    <div>
+      <Label>Discount Percentage</Label>
+      <Input
+        type="number"
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        placeholder="10"
+      />
+    </div>
+    <div>
+      <Label>Minimum Kids Required</Label>
+      <Input
+        type="number"
+        value={rules.minKids}
+        onChange={(event) => setRules({ ...rules, minKids: Number(event.target.value) })}
+        placeholder="5"
+      />
+    </div>
+  </div>
+);
+
+const SpecialPricingFields = ({ rules, setRules }) => (
+  <div className="space-y-4">
+    <div>
+      <Label>Applicable Day</Label>
+      <Input
+        value={rules.day}
+        onChange={(event) => setRules({ ...rules, day: event.target.value })}
+        placeholder="Wednesday"
+      />
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div>
+        <Label>First Hour Price (₹)</Label>
+        <Input
+          type="number"
+          value={rules.firstHourPrice}
+          onChange={(event) => setRules({ ...rules, firstHourPrice: Number(event.target.value) })}
+          placeholder="350"
+        />
+      </div>
+      <div>
+        <Label>Additional Hour Price (₹)</Label>
+        <Input
+          type="number"
+          value={rules.nextHourPrice}
+          onChange={(event) => setRules({ ...rules, nextHourPrice: Number(event.target.value) })}
+          placeholder="150"
+        />
+      </div>
+    </div>
+  </div>
+);
+
+
 function Offers() {
-  const [offers, setOffers] = React.useState(initialOffers);
+  const [offers, setOffers] = React.useState([]);
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [type, setType] = React.useState("flat");
-  const [value, setValue] = React.useState(0);
+  const [type, setType] = React.useState("membership");
+  const [value, setValue] = React.useState(4500);
+  const [rules, setRules] = React.useState(defaultRulesByType.membership);
   const [message, setMessage] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
 
-  const createOffer = () => {
-    if (!name.trim() || value <= 0) {
-      setMessage("Please provide a name and a valid value.");
+  const normalizeOffer = (offer) => ({
+    ...offer,
+    id: offer.id || offer._id,
+  });
+
+  const updateType = (nextType) => {
+    setType(nextType);
+    setRules(defaultRulesByType[nextType]);
+    setValue(nextType === "discount" ? 10 : nextType === "membership" ? 4500 : 0);
+  };
+
+  const fetchOffers = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_BASE}/offers`, {
+        withCredentials: true,
+      });
+      const serverOffers = Array.isArray(response.data.offers)
+        ? response.data.offers.map(normalizeOffer)
+        : [];
+      setOffers(serverOffers);
+    } catch (error) {
+      setMessage(error?.response?.data?.message || "Unable to load offers.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    Promise.resolve().then(fetchOffers);
+  }, [fetchOffers]);
+
+  const createOffer = async () => {
+    if (!name.trim() || (type !== "special_pricing" && value <= 0) || !type) {
+      setMessage("Please provide an offer name, type, and valid values.");
       return;
     }
 
-    const nextOffer = {
-      id: `offer-${Date.now()}`,
-      name: name.trim(),
-      description: description.trim(),
-      type,
-      value,
-      active: true,
-    };
+    try {
+      const response = await axios.post(
+        `${API_BASE}/offers/createoffer`,
+        {
+          name: name.trim(),
+          description: description.trim(),
+          type,
+          value: type === "special_pricing" ? 0 : Number(value),
+          rules,
+          active: true,
+        },
+        {
+          withCredentials: true,
+        },
+      );
 
-    setOffers((current) => [nextOffer, ...current]);
-    setOpen(false);
-    setName("");
-    setDescription("");
-    setType("flat");
-    setValue(0);
-    setMessage("Offer created successfully.");
+      const nextOffer = normalizeOffer(response.data.offer);
+      setOffers((current) => [nextOffer, ...current]);
+      setOpen(false);
+      setName("");
+      setDescription("");
+      setType("membership");
+      setValue(4500);
+      setRules(defaultRulesByType.membership);
+      setMessage("Offer created successfully.");
+    } catch (error) {
+      setMessage(error?.response?.data?.message || "Unable to create offer.");
+    }
   };
 
-  const toggleActive = (id) => {
-    setOffers((current) =>
-      current.map((offer) =>
-        offer.id === id ? { ...offer, active: !offer.active } : offer,
-      ),
-    );
+  const toggleActive = async (id) => {
+    try {
+      const response = await axios.patch(
+        `${API_BASE}/offers/${id}/toggle`,
+        null,
+        {
+          withCredentials: true,
+        },
+      );
+      const updated = normalizeOffer(response.data.offer);
+      setOffers((current) =>
+        current.map((offer) => (offer.id === updated.id ? updated : offer)),
+      );
+    } catch (error) {
+      setMessage(error?.response?.data?.message || "Unable to update offer status.");
+    }
   };
 
-  const removeOffer = (id) => {
+  const removeOffer = async (id) => {
     if (!window.confirm("Delete this offer?")) return;
-    setOffers((current) => current.filter((offer) => offer.id !== id));
-    setMessage("Offer removed.");
+
+    try {
+      await axios.delete(`${API_BASE}/offers/${id}`, {
+        withCredentials: true,
+      });
+      setOffers((current) => current.filter((offer) => offer.id !== id));
+      setMessage("Offer removed.");
+    } catch (error) {
+      setMessage(error?.response?.data?.message || "Unable to delete offer.");
+    }
   };
 
   return (
@@ -303,10 +523,10 @@ function Offers() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold">Offers</h1>
-          <p className="text-muted-foreground mt-1">Create flat, percentage, or combo discounts for your cafe.</p>
+          <p className="text-muted-foreground mt-1">Create and manage Crazy Kids membership, discount, and special pricing offers.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button className="h-11 px-6" onClick={() => setOpen(true)}>
+        <div className="flex items-center gap-3 text-white">
+          <Button className="h-11 px-6 bg-blue-600" onClick={() => setOpen(true)}>
             <Plus className="h-4 w-4" />
             New offer
           </Button>
@@ -314,6 +534,7 @@ function Offers() {
       </div>
 
       {message && <div className="rounded-xl border border-input bg-muted/50 px-4 py-3 text-sm text-muted-foreground">{message}</div>}
+      {loading && <div className="rounded-xl border border-input bg-muted/50 px-4 py-3 text-sm text-muted-foreground">Loading offers...</div>}
 
       <div className="grid gap-5 md:grid-cols-3">
         {offers.map((offer) => {
@@ -330,9 +551,37 @@ function Offers() {
                 <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{typeLabel[offer.type]}</div>
                 <div className="font-semibold text-lg mt-1">{offer.name}</div>
                 {offer.description && <p className="text-sm text-muted-foreground mt-2">{offer.description}</p>}
-                <div className="mt-5 text-3xl font-semibold text-foreground">
-                  {offer.type === "percent" ? `${offer.value}%` : `₹${offer.value}`}
-                </div>
+                {offer.type === "membership" && (
+                  <div className="mt-5 space-y-3 text-foreground">
+                    <div className="text-3xl font-semibold">₹{offer.value}</div>
+                    <div className="text-sm">Kids Allowed: {offer.rules.kidsAllowed}</div>
+                    <div className="text-sm">Play Hours: {offer.rules.playHours}</div>
+                    <div className="text-sm">Validity: {offer.rules.validityMonths} months</div>
+                    {offer.rules.benefits?.length > 0 && (
+                      <div className="space-y-1 rounded-xl bg-muted/10 p-3 text-sm">
+                        <div className="font-medium">Benefits</div>
+                        <ul className="list-disc pl-5">
+                          {offer.rules.benefits.map((benefit, index) => (
+                            <li key={index}>{benefit}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {offer.type === "discount" && (
+                  <div className="mt-5 space-y-2 text-foreground">
+                    <div className="text-3xl font-semibold">{offer.value}% off</div>
+                    <div className="text-sm">Minimum Kids: {offer.rules.minKids}</div>
+                  </div>
+                )}
+                {offer.type === "special_pricing" && (
+                  <div className="mt-5 space-y-2 text-foreground">
+                    <div className="text-3xl font-semibold">{offer.rules.day}</div>
+                    <div className="text-sm">First Hour: ₹{offer.rules.firstHourPrice}</div>
+                    <div className="text-sm">Additional Hour: ₹{offer.rules.nextHourPrice}</div>
+                  </div>
+                )}
               </div>
               <div className="mt-5 flex items-center justify-between">
                 <span className={cn(
@@ -352,15 +601,15 @@ function Offers() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent open={open} onOpenChange={setOpen}>
+        <DialogContent open={open} onOpenChange={setOpen} className="bg-white">
           <DialogHeader>
             <DialogTitle>Add new offer</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 pt-4">
             <div>
-              <Label>Name</Label>
-              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Festive Special" />
+              <Label>Offer Name</Label>
+              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Family Membership" />
             </div>
             <div>
               <Label>Description</Label>
@@ -368,35 +617,37 @@ function Offers() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <Label>Type</Label>
-                <Select value={type} onValueChange={(value) => setType(value)}>
-                  <SelectTrigger>
+                <Label>Offer Type</Label>
+                <Select  value={type} onValueChange={updateType}>
+                  <SelectTrigger >
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="flat">Flat ₹ off</SelectItem>
-                    <SelectItem value="percent">% off</SelectItem>
-                    <SelectItem value="combo">Combo</SelectItem>
+                  <SelectContent className="bg-white">
+                    {offerTypeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label>{type === "percent" ? "Percent" : "Value (₹)"}</Label>
-                <Input
-                  type="number"
-                  value={value}
-                  onChange={(event) => setValue(Number(event.target.value))}
-                  placeholder={type === "percent" ? "15" : "100"}
-                />
-              </div>
             </div>
+            {type === "membership" && (
+              <MembershipFields value={value} rules={rules} setValue={setValue} setRules={setRules} />
+            )}
+            {type === "discount" && (
+              <DiscountFields value={value} rules={rules} setValue={setValue} setRules={setRules} />
+            )}
+            {type === "special_pricing" && (
+              <SpecialPricingFields rules={rules} setRules={setRules} />
+            )}
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={createOffer}>Create</Button>
+            <Button onClick={createOffer} className="bg-blue-600 text-white">Create</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

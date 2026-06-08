@@ -3,6 +3,7 @@ const express = require('express');
 const app = express();
 const userroutes = require('./routes/user.routes')
 const menuroutes = require('./routes/menu.routes')
+const offerroutes = require('./routes/offer.routes')
 const cors = require('cors');
 const cookieParser = require("cookie-parser");
 
@@ -21,6 +22,7 @@ connectDB();
 app.use(express.json());
 app.use('/users', userroutes);
 app.use('/menu',menuroutes)
+app.use('/offers',offerroutes)
 
 
 
