@@ -11,7 +11,7 @@ import Offers from "./pages/Admin/Offers";
 import Whatsapp from "./pages/Admin/Whatsapp";
 import Settings from "./pages/Admin/Settings";
 import Cafemenu from "./pages/Desk/Cafemenu";
-import Sessions from "./pages/Desk/Sessions";
+import Runningbills from "./pages/Desk/Runningbills"
 
 const App = () => {
   return (
@@ -29,9 +29,9 @@ const App = () => {
 
       <Route path="/desk" element={<Desklayout />}>
       <Route path="billing" element={<Billing/>} />
+      <Route path="runningbills" element={<Runningbills/>} />
       <Route path="cafepos" element={<Cafepos/>}/>
       <Route path="cafemenu" element={<Cafemenu/>}/>
-      <Route path="sessions" element={<Sessions/>}/>
       </Route>
     </Routes>
   );

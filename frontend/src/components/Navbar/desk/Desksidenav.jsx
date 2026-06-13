@@ -11,8 +11,8 @@ import axios from "axios";
 
 const navItems = [
   { label: "Billing", icon: Receipt, path: "/desk/billing" },
+  {label: "Running Bills", icon:Timer,path:"/desk/runningbills"},
   { label: "Cafe POS", icon: Coffee, path: "/desk/cafepos" },
-  { label: "Sessions", icon: Timer, path: "/desk/sessions" },
   { label: "Cafe Menu", icon: UtensilsCrossed, path: "/desk/cafemenu" },
 ];
 
