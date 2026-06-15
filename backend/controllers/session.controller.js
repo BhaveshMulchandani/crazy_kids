@@ -1,16 +1,22 @@
+const sessionmodel = require("../models/session.model");
+
 const calculateAge = (dob) => {
   const birthDate = new Date(dob);
   const today = new Date();
 
-  let age = today.getFullYear() - birthDate.getFullYear();
+  let age =
+    today.getFullYear() -
+    birthDate.getFullYear();
 
   const monthDiff =
-    today.getMonth() - birthDate.getMonth();
+    today.getMonth() -
+    birthDate.getMonth();
 
   if (
     monthDiff < 0 ||
     (monthDiff === 0 &&
-      today.getDate() < birthDate.getDate())
+      today.getDate() <
+        birthDate.getDate())
   ) {
     age--;
   }
@@ -18,9 +24,10 @@ const calculateAge = (dob) => {
   return age;
 };
 
-const sessionmodel = require("../models/session.model");
-
-const createsession = async (req, res) => {
+const createsession = async (
+  req,
+  res
+) => {
   try {
     const {
       parentName,
@@ -33,69 +40,95 @@ const createsession = async (req, res) => {
       notes,
     } = req.body;
 
-    // Required validations
+    // Validations
 
-    if (!parentName || !mobileNumber) {
+    if (!parentName?.trim()) {
       return res.status(400).json({
         message:
-          "Parent name and mobile number are required",
+          "Parent name is required",
       });
     }
 
-    if (!children || children.length === 0) {
+    if (!mobileNumber?.trim()) {
       return res.status(400).json({
-        message: "At least one child is required",
+        message:
+          "Mobile number is required",
       });
     }
 
-    // Child validation + age calculation
+    if (
+      !children ||
+      !Array.isArray(children) ||
+      children.length === 0
+    ) {
+      return res.status(400).json({
+        message:
+          "At least one child is required",
+      });
+    }
 
-    const processedChildren = children.map(
-      (child) => {
-        if (!child.name || !child.dob) {
+    const processedChildren =
+      children.map((child) => {
+        if (
+          !child.name ||
+          !child.dob
+        ) {
           throw new Error(
-            "Child name and DOB are required"
+            "Each child must have name and DOB"
           );
         }
 
         return {
-          name: child.name,
+          name: child.name.trim(),
           dob: child.dob,
-          age: calculateAge(child.dob),
+          age: calculateAge(
+            child.dob
+          ),
         };
-      }
-    );
-
-    // Session Number
+      });
 
     const count =
-      (await sessionmodel.countDocuments()) + 1;
+      (await sessionmodel.countDocuments()) +
+      1;
 
     const sessionNumber = `CK-${String(
       count
     ).padStart(5, "0")}`;
 
-    const session = await sessionmodel.create({
-      sessionNumber,
+    const session =
+      await sessionmodel.create({
+        sessionNumber,
 
-      parentName,
-      mobileNumber,
+        parentName:
+          parentName.trim(),
 
-      bandNumber: bandNumber || "",
+        mobileNumber:
+          mobileNumber.trim(),
 
-      children: processedChildren,
+        bandNumber:
+          bandNumber?.trim() || "",
 
-      offer: offer || null,
+        children:
+          processedChildren,
 
-      reference: reference || "",
+        offer:
+          offer || null,
 
-      socksRequired:
-        socksRequired ?? false,
+        reference:
+          reference?.trim() || "",
 
-      notes: notes || "",
+        socksRequired:
+          socksRequired ?? false,
 
-      status: "booked",
-    });
+        notes:
+          notes?.trim() || "",
+
+        bookedHours: 1,
+        extendedHours: 0,
+        totalHours: 1,
+
+        status: "booked",
+      });
 
     return res.status(201).json({
       message:
@@ -104,9 +137,33 @@ const createsession = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({
-      message: error.message,
+      message:
+        error.message ||
+        "Internal server error",
     });
   }
 };
 
-module.exports = {createsession}
+const bookedsession = async (req, res) => {
+  try {
+    const sessions = await sessionmodel
+      .find({ status: "booked" })
+      .populate("offer")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      message: "Booked sessions fetched successfully",
+      count: sessions.length,
+      sessions,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+module.exports = {
+  createsession,bookedsession,
+};

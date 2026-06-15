@@ -4,5 +4,7 @@ const sessioncontroller = require('../controllers/session.controller')
 const authmiddleware = require('../middlewares/user.middleware')
 
 router.post('/create',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.createsession)
+router.get('/booked',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.bookedsession)
+
 
 module.exports = router

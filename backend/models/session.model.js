@@ -22,6 +22,21 @@ const childSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const extensionSchema = new mongoose.Schema(
+  {
+    hours: {
+      type: Number,
+      default: 1,
+    },
+
+    addedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const sessionSchema = new mongoose.Schema(
   {
     sessionNumber: {
@@ -61,8 +76,14 @@ const sessionSchema = new mongoose.Schema(
 
     offer: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "offer",
+      ref: "Offer",
       default: null,
+    },
+
+    reference: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     socksRequired: {
@@ -71,12 +92,6 @@ const sessionSchema = new mongoose.Schema(
     },
 
     notes: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    reference: {
       type: String,
       default: "",
       trim: true,
@@ -95,15 +110,46 @@ const sessionSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Timing
+
     startTime: {
       type: Date,
       default: null,
     },
 
-    endTime: {
+    scheduledEndTime: {
       type: Date,
       default: null,
     },
+
+    actualEndTime: {
+      type: Date,
+      default: null,
+    },
+
+    // Hours
+
+    bookedHours: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+
+    extendedHours: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    totalHours: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+
+    extensions: [extensionSchema],
+
+    // Pause tracking
 
     pauseHistory: [
       {
@@ -116,41 +162,13 @@ const sessionSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
-    cafeAmount: {
-      type: Number,
-      default: 0,
-    },
-
-    sessionAmount: {
-      type: Number,
-      default: 0,
-    },
-
-    totalAmount: {
-      type: Number,
-      default: 0,
-    },
   },
   {
     timestamps: true,
   }
 );
 
-sessionSchema.index({
-  parentName: 1,
-});
-
-sessionSchema.index({
-  mobileNumber: 1,
-});
-
-sessionSchema.index({
-  bandNumber: 1,
-});
-
-sessionSchema.index({
-  status: 1,
-});
-
-module.exports = mongoose.model("session", sessionSchema);
+module.exports = mongoose.model(
+  "session",
+  sessionSchema
+);
