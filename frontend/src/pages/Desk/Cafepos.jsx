@@ -1,7 +1,6 @@
 import * as React from "react";
 import axios from "axios";
 import {
-  Award,
   Coffee,
   Loader2,
   Minus,
@@ -117,23 +116,6 @@ DialogFooter.displayName = "DialogFooter";
 
 const CATS = ["all", "drinks", "snacks", "desserts", "others"];
 
-const MOCK_MENU = [
-  { id: "m1", name: "Espresso", price: 120, category: "drinks", image_url: "", available: true },
-  { id: "m2", name: "Cappuccino", price: 160, category: "drinks", image_url: "", available: true },
-  { id: "m3", name: "Lemonade", price: 90, category: "drinks", image_url: "", available: true },
-  { id: "m4", name: "French Fries", price: 110, category: "snacks", image_url: "", available: true },
-  { id: "m5", name: "Veg Sandwich", price: 150, category: "snacks", image_url: "", available: true },
-  { id: "m6", name: "Brownie", price: 130, category: "desserts", image_url: "", available: true },
-  { id: "m7", name: "Cookies", price: 80, category: "desserts", image_url: "", available: true },
-  { id: "m8", name: "Nachos", price: 170, category: "others", image_url: "", available: true },
-];
-
-const MOCK_CUSTOMERS = [
-  { id: "c1", child_name: "Asha", parent_name: "Rita", mobile: "9800000001", customer_code: "C001", total_spent: 1200, reward_points: 30 },
-  { id: "c2", child_name: "Rahul", parent_name: "Sunil", mobile: "9800000002", customer_code: "C002", total_spent: 300, reward_points: 10 },
-  { id: "c3", child_name: "Isha", parent_name: "Amit", mobile: "9800000003", customer_code: "C003", total_spent: 450, reward_points: 18 },
-];
-
 const iconMap = {
   drinks: "🥤",
   snacks: "🍟",
@@ -143,76 +125,72 @@ const iconMap = {
 
 const toEmoji = (category) => iconMap[category] ?? "🍽️";
 
-function findCustomerMock(query) {
-  const q = query.trim().toLowerCase();
-  if (!q) return null;
-  return MOCK_CUSTOMERS.find(
-    (customer) =>
-      customer.mobile === q ||
-      customer.customer_code.toLowerCase() === q ||
-      customer.parent_name.toLowerCase().includes(q) ||
-      customer.child_name.toLowerCase().includes(q),
-  );
-}
+function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
+  if (!kot) return null;
 
-function ReceiptDialog({ receipt, onClose }) {
-  if (!receipt) return null;
+  const kotNumber = kot.kotNumber ?? kot._id ?? "—";
+  const sessionNumber = customer?.sessionNumber ?? "—";
+  const parentName = customer?.parentName ?? "—";
+  const createdAt = kot.createdAt ? new Date(kot.createdAt) : new Date();
+  const total = cartSnapshot.reduce((sum, item) => sum + item.qty * item.price, 0);
 
   const print = () => {
     const w = window.open("", "_blank", "width=420,height=700");
     if (!w) return;
     const html = document.getElementById("cafe-receipt")?.innerHTML ?? "";
-    w.document.write(`<html><head><title>Cafe Receipt</title><style>@page{size:80mm auto;margin:4mm} body{font-family:'Courier New',monospace;width:72mm;font-size:12px;color:#000;padding:8px}.row{display:flex;justify-content:space-between}.hr{border-top:1px dashed #000;margin:6px 0}.center{text-align:center}</style></head><body>${html}</body></html>`);
+    w.document.write(`<html><head><title>KOT ${kotNumber}</title><style>@page{size:80mm auto;margin:4mm} body{font-family:'Courier New',monospace;width:72mm;font-size:12px;color:#000;padding:8px}.row{display:flex;justify-content:space-between}.hr{border-top:1px dashed #000;margin:6px 0}.center{text-align:center}</style></head><body>${html}</body></html>`);
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 250);
   };
 
   return (
-    <Dialog open={!!receipt} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+    <Dialog open={!!kot} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md bg-white">
         <DialogHeader>
-          <DialogTitle>Order placed</DialogTitle>
+          <DialogTitle>Order placed · KOT #{kotNumber}</DialogTitle>
         </DialogHeader>
         <div id="cafe-receipt" style={{ fontFamily: "'Courier New', monospace", fontSize: 12, color: "#000", padding: 8 }}>
           <div className="text-center" style={{ marginBottom: 12 }}>
             <div style={{ fontWeight: 700, fontSize: 14 }}>PLAYKIT CAFE</div>
-            <div>Order #{receipt.orderRef}</div>
-            <div>{receipt.at.toLocaleString()}</div>
+            <div>KOT #{kotNumber}</div>
+            <div>{createdAt.toLocaleString()}</div>
           </div>
-          <div className="row" style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Cust</span>
-            <span>{receipt.customer.child_name}</span>
+          <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>Session</span>
+            <span>{sessionNumber}</span>
           </div>
-          <div className="row" style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Mob</span>
-            <span>{receipt.customer.mobile}</span>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>Customer</span>
+            <span>{parentName}</span>
           </div>
-          <div className="hr" />
-          {receipt.items.map((item, index) => (
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>Table</span>
+            <span>{tableNumber || "—"}</span>
+          </div>
+          <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
+          {cartSnapshot.map((item, index) => (
             <div key={index} style={{ marginBottom: 6 }}>
-              <div className="row" style={{ display: "flex", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span>{item.qty}× {item.name}</span>
                 <span>₹{item.qty * item.price}</span>
               </div>
               {item.notes && <div style={{ fontSize: 11, color: "#444", paddingLeft: 8 }}>* {item.notes}</div>}
             </div>
           ))}
-          <div className="hr" />
-          <div className="row" style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 14 }}>
+          <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 14 }}>
             <span>TOTAL</span>
-            <span>₹{receipt.total}</span>
+            <span>₹{total}</span>
           </div>
-          <div className="hr" />
-          <div className="text-center">
-            <div>+{receipt.points} reward points</div>
-            <div style={{ marginTop: 4 }}>Thank you!</div>
-          </div>
+          <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
+          <div style={{ textAlign: "center", marginTop: 4 }}>Thank you!</div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button onClick={print} style={{ background: "var(--gradient-primary)" }}>
-            <Printer className="h-4 w-4" /> Print receipt
+            <Printer className="h-4 w-4" /> Print KOT
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -223,20 +201,24 @@ function ReceiptDialog({ receipt, onClose }) {
 function Cafepos() {
   const [search, setSearch] = React.useState("");
   const [customerLookup, setCustomerLookup] = React.useState("");
+  const [searchResults, setSearchResults] = React.useState([]);
+  const [searchLoading, setSearchLoading] = React.useState(false);
   const [customer, setCustomer] = React.useState(null);
+  const [tableNumber, setTableNumber] = React.useState("");
   const [cat, setCat] = React.useState("all");
   const [cart, setCart] = React.useState([]);
   const [submitting, setSubmitting] = React.useState(false);
-  const [receipt, setReceipt] = React.useState(null);
-  const [menu, setMenu] = React.useState(MOCK_MENU);
+  const [kot, setKot] = React.useState(null);
+  const [cartSnapshot, setCartSnapshot] = React.useState([]);
+  const [menu, setMenu] = React.useState([]);
   const [loadingMenu, setLoadingMenu] = React.useState(false);
 
   React.useEffect(() => {
     const fetchMenu = async () => {
       setLoadingMenu(true);
       try {
-        const response = await axios.get("http://localhost:3000/menu/getall");
-        const apiMenu = response?.data?.menu;
+        const response = await axios.get("http://localhost:3000/menu/getall", { withCredentials: true });
+        const apiMenu = response?.data?.menu ?? response?.data ?? [];
         if (Array.isArray(apiMenu)) {
           setMenu(
             apiMenu.map((item) => ({
@@ -248,8 +230,6 @@ function Cafepos() {
               available: item.available ?? true,
             })),
           );
-        } else {
-          toast.error("Menu response was invalid");
         }
       } catch (error) {
         console.error("Failed to load menu", error);
@@ -258,7 +238,6 @@ function Cafepos() {
         setLoadingMenu(false);
       }
     };
-
     fetchMenu();
   }, []);
 
@@ -269,14 +248,42 @@ function Cafepos() {
     return availableMenu.filter((item) => (cat === "all" || item.category === cat) && (!q || item.name.toLowerCase().includes(q)));
   }, [availableMenu, search, cat]);
 
-  const findCustomer = () => {
-    const result = findCustomerMock(customerLookup);
-    if (!result) {
-      toast.error("No customer found");
-      setCustomer(null);
+  const findCustomer = async () => {
+    const q = customerLookup.trim();
+    if (!q) {
+      toast.error("Enter a mobile number, name, or band number");
       return;
     }
-    setCustomer(result);
+    setSearchLoading(true);
+    setSearchResults([]);
+    setCustomer(null);
+    try {
+      const res = await axios.get(
+        `http://localhost:3000/cafe/search?q=${encodeURIComponent(q)}`,
+        { withCredentials: true },
+      );
+      const sessions = res.data.sessions ?? res.data ?? [];
+      if (!Array.isArray(sessions) || sessions.length === 0) {
+        toast.error("No session found");
+        return;
+      }
+      if (sessions.length === 1) {
+        setCustomer(sessions[0]);
+        setSearchResults([]);
+      } else {
+        setSearchResults(sessions);
+      }
+    } catch (error) {
+      console.log(error);
+      toast.error(error.response?.data?.message || "Search failed");
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const selectSession = (session) => {
+    setCustomer(session);
+    setSearchResults([]);
   };
 
   const add = (item) => {
@@ -287,7 +294,7 @@ function Cafepos() {
         copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
         return copy;
       }
-      return [...prev, { menu_id: item.id, name: item.name, price: Number(item.price), qty: 1 }];
+      return [...prev, { menu_id: item.id, name: item.name, price: Number(item.price), qty: 1, notes: "" }];
     });
   };
 
@@ -303,33 +310,76 @@ function Cafepos() {
 
   const total = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
 
-  const submit = () => {
+  const submit = async () => {
     if (!customer) {
       toast.error("Pick a customer first");
+      return;
+    }
+    if (!tableNumber.trim()) {
+      toast.error("Enter a table number");
       return;
     }
     if (cart.length === 0) {
       toast.error("Add items to the cart");
       return;
     }
+
     setSubmitting(true);
-    setTimeout(() => {
-      const points = Math.floor(total / 50);
-      const orderRef = `C-${String(Date.now()).slice(-6)}`;
-      setReceipt({
-        customer,
-        items: cart,
-        total,
-        points,
-        at: new Date(),
-        orderRef,
-      });
+    try {
+      const items = cart.map((item) => ({
+        menuItem: item.menu_id,
+        quantity: item.qty,
+        notes: item.notes ?? "",
+      }));
+
+      console.log("REQUEST PAYLOAD", {
+  sessionId: customer._id,
+  tableNumber: tableNumber.trim(),
+  items,
+});
+
+      const createRes = await axios.post(
+        "http://localhost:3000/cafe/create",
+        {
+          sessionId: customer._id,
+          tableNumber: tableNumber.trim(),
+          items,
+        },
+        { withCredentials: true },
+      );
+
+      console.log("REQUEST PAYLOAD", {
+  sessionId: customer._id,
+  tableNumber: tableNumber.trim(),
+  items,
+});
+
+      const createdKot = createRes.data.kot ?? createRes.data;
+      const kotId = createdKot._id;
+
+      let fullKot = createdKot;
+      try {
+        const kotRes = await axios.get(`http://localhost:3000/cafe/kot/${kotId}`, {
+          withCredentials: true,
+        });
+        fullKot = kotRes.data.kot ?? kotRes.data ?? createdKot;
+      } catch (err) {
+        console.log("KOT fetch failed, using created data", err);
+      }
+
+      setCartSnapshot([...cart]);
+      setKot(fullKot);
       setCart([]);
-      setSubmitting(false);
       toast.success(`Order placed · ₹${total}`);
-    }, 600);
+    } catch (error) {
+      console.log(error);
+      toast.error(error.response?.data?.message || "Failed to place order");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
+  
   return (
     <div className="space-y-5 px-6 py-8">
       <div className="flex items-center justify-between">
@@ -395,40 +445,66 @@ function Cafepos() {
             <div className="mt-2 flex gap-2">
               <Input
                 className="h-10"
-                placeholder="Mobile or Customer ID"
+                placeholder="Mobile, name, or band no."
                 value={customerLookup}
-                onChange={(e) => setCustomerLookup(e.target.value)}
+                onChange={(e) => { setCustomerLookup(e.target.value); setSearchResults([]); }}
                 onKeyDown={(e) => e.key === "Enter" && findCustomer()}
               />
-              <Button type="button" variant="outline" onClick={findCustomer}>Find</Button>
+              <Button type="button" variant="outline" onClick={findCustomer} disabled={searchLoading}>
+                {searchLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Find"}
+              </Button>
             </div>
+
+            {searchResults.length > 1 && (
+              <div className="mt-2 rounded-xl border bg-background shadow-md overflow-hidden">
+                {searchResults.map((s) => (
+                  <button
+                    key={s._id}
+                    type="button"
+                    onClick={() => selectSession(s)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-secondary/60 border-b last:border-b-0"
+                  >
+                    <div className="font-medium">{s.parentName}</div>
+                    <div className="text-xs text-muted-foreground">{s.mobileNumber} · {s.sessionNumber}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {customer && (
               <div className="mt-3 rounded-xl border bg-secondary/40 p-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="font-semibold">{customer.child_name}</div>
+                    <div className="font-semibold">{customer.parentName}</div>
                     <div className="text-xs text-muted-foreground">
-                      {customer.mobile} · <span className="font-mono text-primary">{customer.customer_code}</span>
+                      {customer.mobileNumber} · <span className="font-mono text-primary">{customer.sessionNumber}</span>
                     </div>
                   </div>
                   <button type="button" onClick={() => setCustomer(null)} className="text-muted-foreground hover:text-foreground">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="grid grid-cols-2 gap-2 mt-2 text-center text-xs">
-                  <div className="bg-card rounded p-1.5">
-                    <div className="text-muted-foreground">Spent</div>
-                    <div className="font-semibold">₹{Number(customer.total_spent).toLocaleString()}</div>
+                {customer.children?.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {customer.children.map((c, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-card text-xs">
+                        {c.name} · {c.age}y
+                      </span>
+                    ))}
                   </div>
-                  <div className="bg-card rounded p-1.5">
-                    <div className="text-muted-foreground flex items-center justify-center gap-1">
-                      <Award className="h-3 w-3" /> Points
-                    </div>
-                    <div className="font-semibold">{customer.reward_points ?? 0}</div>
-                  </div>
-                </div>
+                )}
               </div>
             )}
+
+            <div className="mt-3">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Table Number</Label>
+              <Input
+                className="mt-1 h-10"
+                placeholder="e.g. T1, T2…"
+                value={tableNumber}
+                onChange={(e) => setTableNumber(e.target.value)}
+              />
+            </div>
           </div>
 
           <div className="surface-card p-4">
@@ -485,7 +561,13 @@ function Cafepos() {
         </div>
       </div>
 
-      <ReceiptDialog receipt={receipt} onClose={() => setReceipt(null)} />
+      <ReceiptDialog
+        kot={kot}
+        customer={customer}
+        cartSnapshot={cartSnapshot}
+        tableNumber={tableNumber}
+        onClose={() => setKot(null)}
+      />
     </div>
   );
 }

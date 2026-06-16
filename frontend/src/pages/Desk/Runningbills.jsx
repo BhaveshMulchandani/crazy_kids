@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useRef, useCallback, useContext } from "react";
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useContext,
+} from "react";
 import { toast } from "sonner";
 import {
   Timer,
@@ -14,7 +20,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 
-import axios from "axios"
+import axios from "axios";
 
 // Helper functions
 const elapsedSeconds = (bill) => {
@@ -33,7 +39,14 @@ const formatHMS = (seconds) => {
 };
 
 // UI Components
-const Button = ({ className, variant = "default", size = "default", type = "button", children, ...props }) => {
+const Button = ({
+  className,
+  variant = "default",
+  size = "default",
+  type = "button",
+  children,
+  ...props
+}) => {
   const baseStyles =
     "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed";
 
@@ -100,11 +113,11 @@ const Select = ({
 
   const registerItem = useCallback((itemValue, label) => {
     setItems((prev) =>
-      prev[itemValue] === label ? prev : { ...prev, [itemValue]: label }
+      prev[itemValue] === label ? prev : { ...prev, [itemValue]: label },
     );
   }, []);
 
-  const valueLabel = value != null ? items[value] ?? value : "";
+  const valueLabel = value != null ? (items[value] ?? value) : "";
 
   useEffect(() => {
     if (!open) return;
@@ -114,8 +127,7 @@ const Select = ({
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () =>
-      document.removeEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
   return (
@@ -272,7 +284,14 @@ const Row = ({ k, v }) => (
   </div>
 );
 
-const BillCard = ({ bill, onPause, onResume, onCheckout, onStart, onExtend }) => {
+const BillCard = ({
+  bill,
+  onPause,
+  onResume,
+  onCheckout,
+  onStart,
+  onExtend,
+}) => {
   const secs = elapsedSeconds(bill);
   const children = bill.children ?? [];
   const paused = bill.status === "paused";
@@ -313,8 +332,8 @@ const BillCard = ({ bill, onPause, onResume, onCheckout, onStart, onExtend }) =>
             paused
               ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
               : bill.status === "booked"
-              ? "bg-blue-500/15 text-blue-700 dark:text-blue-400"
-              : "bg-green-500/15 text-green-700 dark:text-green-400"
+                ? "bg-blue-500/15 text-blue-700 dark:text-blue-400"
+                : "bg-green-500/15 text-green-700 dark:text-green-400"
           }`}
         >
           {paused ? (
@@ -344,7 +363,9 @@ const BillCard = ({ bill, onPause, onResume, onCheckout, onStart, onExtend }) =>
       </div>
       <div className="text-xs text-muted-foreground">
         billed as {bill.totalHours ?? 0} hr
-        {bill.startTime ? ` · started ${new Date(bill.startTime).toLocaleTimeString()}` : ""}
+        {bill.startTime
+          ? ` · started ${new Date(bill.startTime).toLocaleTimeString()}`
+          : ""}
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
@@ -406,7 +427,12 @@ const BillCard = ({ bill, onPause, onResume, onCheckout, onStart, onExtend }) =>
               <Coffee className="h-3.5 w-3.5 mr-1" /> Add cafe
             </Button>
 
-            <Button size="sm" variant="outline" className="flex-1" onClick={onExtend}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={onExtend}
+            >
               <Clock className="h-3.5 w-3.5 mr-1" /> Extend 1 hr
             </Button>
 
@@ -485,20 +511,14 @@ const CheckoutDialog = ({
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Extra discount (₹)</Label>
-            <Input
-              type="text"
-              value="--"
-              disabled
-            />
+            <Input type="text" value="--" disabled />
           </div>
           <div className="h-px bg-border" />
           <Row k="Subtotal" v="--" />
           <Row k="Discount" v="--" />
           <div className="flex justify-between items-baseline pt-1">
             <span className="text-muted-foreground">Final total</span>
-            <span className="text-3xl font-semibold gradient-text">
-              --
-            </span>
+            <span className="text-3xl font-semibold gradient-text">--</span>
           </div>
           <div className="text-xs text-muted-foreground">
             Earns -- reward points
@@ -540,14 +560,10 @@ const InvoiceDialog = ({ invoice, onClose }) => {
   };
 
   const ch = invoice.children ?? [];
-  const start = invoice.startTime
-    ? new Date(invoice.startTime)
-    : null;
+  const start = invoice.startTime ? new Date(invoice.startTime) : null;
   const end = invoice.closed_at ? new Date(invoice.closed_at) : null;
   const durMin =
-    start && end
-      ? Math.round((end.getTime() - start.getTime()) / 60000)
-      : 0;
+    start && end ? Math.round((end.getTime() - start.getTime()) / 60000) : 0;
 
   return (
     <Dialog open={!!invoice} onOpenChange={(o) => !o && onClose()}>
@@ -556,7 +572,13 @@ const InvoiceDialog = ({ invoice, onClose }) => {
           <DialogTitle>Invoice {invoice.invoice_no}</DialogTitle>
         </DialogHeader>
         <div id="invoice-print">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+            }}
+          >
             <div>
               <h1 style={{ fontSize: 22 }}>PLAYKIT</h1>
               <div style={{ fontSize: 12, color: "#666" }}>Tax invoice</div>
@@ -603,8 +625,8 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
           <div style={{ fontSize: 13, marginTop: 8 }}>
             <div>
-              <b>Session:</b> {start?.toLocaleString()} → {end?.toLocaleString()}{" "}
-              ({durMin} min billed)
+              <b>Session:</b> {start?.toLocaleString()} →{" "}
+              {end?.toLocaleString()} ({durMin} min billed)
             </div>
           </div>
 
@@ -630,7 +652,13 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             </tbody>
           </table>
 
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #ddd" }}>
+          <div
+            style={{
+              marginTop: 12,
+              paddingTop: 12,
+              borderTop: "1px solid #ddd",
+            }}
+          >
             <div className="row">
               <span>Subtotal</span>
               <span>--</span>
@@ -639,10 +667,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               <span>Discount</span>
               <span>--</span>
             </div>
-            <div
-              className="row bold"
-              style={{ fontSize: 18, marginTop: 6 }}
-            >
+            <div className="row bold" style={{ fontSize: 18, marginTop: 6 }}>
               <span>TOTAL</span>
               <span>--</span>
             </div>
@@ -687,76 +712,137 @@ function SessionsPage() {
   const [finalInvoice, setFinalInvoice] = useState(null);
   const [bills, setBills] = useState([]);
   const [offers, setOffers] = useState([]);
+  const completingRef = useRef(new Set());
 
   useEffect(() => {
     const t = setInterval(() => force((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Load booked sessions from backend
-  useEffect(() => {
-    const loadBookedSessions = async () => {
+  // Fetch booked + running sessions and merge into bills state
+  const loadSessions = async () => {
+    try {
+      const bookedRes = await axios.get(
+        "http://localhost:3000/session/booked",
+        { withCredentials: true },
+      );
+
+      let runningSessions = [];
+
       try {
-        const res = await axios.get(
-          "http://localhost:3000/session/booked",
-          {
-            withCredentials: true,
-          }
+        const runningRes = await axios.get(
+          "http://localhost:3000/session/running",
+          { withCredentials: true },
         );
 
-        setBills(res.data.sessions);
-      } catch (error) {
-        console.log(error);
-        toast.error(
-          error.response?.data?.message ||
-            "Failed to load sessions"
-        );
+        runningSessions = runningRes.data.sessions ?? [];
+      } catch (err) {
+        console.log("Running sessions API missing");
       }
-    };
 
-    loadBookedSessions();
-  }, []);
-
-  const booked = bills.filter((b) => b.status === "booked");
-  const running = bills.filter((b) => b.status === "running" || b.status === "paused");
-  const completed = bills.filter((b) => b.status === "completed").slice(0, 20);
-
-  const pause = (b) => {
-    const updated = {
-      ...b,
-      status: "paused",
-    };
-    setBills(bills.map((bl) => (bl._id === b._id ? updated : bl)));
-    toast.success("Paused");
+      setBills([...(bookedRes.data.sessions ?? []), ...runningSessions]);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to load sessions");
+    }
   };
 
-  const resume = (b) => {
-    const updated = {
-      ...b,
-      status: "running",
-    };
-    setBills(bills.map((bl) => (bl._id === b._id ? updated : bl)));
-    toast.success("Resumed");
+  // Load on mount
+  useEffect(() => {
+    loadSessions();
+  }, []);
+
+  // Auto-complete sessions whose scheduledEndTime has passed
+  useEffect(() => {
+    const runningBills = bills.filter((b) => b.status === "running");
+    const now = new Date();
+
+    runningBills.forEach(async (b) => {
+      if (!b.scheduledEndTime) return;
+      if (new Date(b.scheduledEndTime) > now) return;
+      if (completingRef.current.has(b._id)) return;
+
+      completingRef.current.add(b._id);
+      try {
+        await axios.patch(
+          `http://localhost:3000/session/complete/${b._id}`,
+          {},
+          { withCredentials: true },
+        );
+        await loadSessions();
+      } catch (error) {
+        console.log(error);
+      } finally {
+        completingRef.current.delete(b._id);
+      }
+    });
+  }, [bills, loadSessions]);
+
+  const booked = bills.filter((b) => b.status === "booked");
+  const running = bills.filter(
+    (b) => b.status === "running" || b.status === "paused",
+  );
+  const completed = bills.filter((b) => b.status === "completed").slice(0, 20);
+
+  const pause = async (b) => {
+    try {
+      await axios.patch(
+        `http://localhost:3000/session/pause/${b._id}`,
+        {},
+        { withCredentials: true },
+      );
+      toast.success("Session paused");
+      await loadSessions();
+    } catch (error) {
+      console.log(error);
+      toast.error(error.response?.data?.message || "Failed to pause session");
+    }
+  };
+
+  const resume = async (b) => {
+    try {
+      await axios.patch(
+        `http://localhost:3000/session/resume/${b._id}`,
+        {},
+        { withCredentials: true },
+      );
+      toast.success("Session resumed");
+      await loadSessions();
+    } catch (error) {
+      console.log(error);
+      toast.error(error.response?.data?.message || "Failed to resume session");
+    }
   };
 
   const checkout = (b) => setCheckoutBillId(b._id);
 
-  const startSession = (b) => {
-    const updated = {
-      ...b,
-      status: 'running',
-      startTime: new Date().toISOString(),
-    };
-    setBills((prev) => prev.map((bl) => (bl._id === b._id ? updated : bl)));
-    toast.success('Session started');
+  const startSession = async (b) => {
+    try {
+      await axios.patch(
+        `http://localhost:3000/session/start/${b._id}`,
+        {},
+        { withCredentials: true },
+      );
+      toast.success("Session started");
+      await loadSessions();
+    } catch (error) {
+      console.log(error);
+      toast.error(error.response?.data?.message || "Failed to start session");
+    }
   };
 
-  const extendHour = (b) => {
-    const start = new Date(b.startTime || Date.now());
-    const newStart = new Date(start.getTime() - 60 * 60 * 1000).toISOString();
-    const updated = { ...b, startTime: newStart };
-    setBills((prev) => prev.map((bl) => (bl._id === b._id ? updated : bl)));
-    toast.success('Extended by 1 hour');
+  const extendHour = async (b) => {
+    try {
+      await axios.patch(
+        `http://localhost:3000/session/extend/${b._id}`,
+        {},
+        { withCredentials: true },
+      );
+      toast.success("Extended by 1 hour");
+      await loadSessions();
+    } catch (error) {
+      console.log(error);
+      toast.error(error.response?.data?.message || "Failed to extend session");
+    }
   };
 
   const handleCheckoutComplete = (completedBill) => {
@@ -851,12 +937,8 @@ function SessionsPage() {
             <thead className="bg-secondary/60 text-muted-foreground">
               <tr>
                 <th className="text-left px-4 py-2.5 font-medium">Invoice</th>
-                <th className="text-left px-4 py-2.5 font-medium">
-                  Customer
-                </th>
-                <th className="text-left px-4 py-2.5 font-medium">
-                  Children
-                </th>
+                <th className="text-left px-4 py-2.5 font-medium">Customer</th>
+                <th className="text-left px-4 py-2.5 font-medium">Children</th>
                 <th className="text-left px-4 py-2.5 font-medium">Closed</th>
                 <th className="text-right px-4 py-2.5 font-medium">Total</th>
               </tr>
@@ -889,13 +971,9 @@ function SessionsPage() {
                   </td>
                   <td className="px-4 py-2.5">{b.children?.length ?? 0}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">
-                    {b.closed_at
-                      ? new Date(b.closed_at).toLocaleString()
-                      : "—"}
+                    {b.closed_at ? new Date(b.closed_at).toLocaleString() : "—"}
                   </td>
-                  <td className="px-4 py-2.5 text-right font-semibold">
-                    --
-                  </td>
+                  <td className="px-4 py-2.5 text-right font-semibold">--</td>
                 </tr>
               ))}
             </tbody>
@@ -912,7 +990,10 @@ function SessionsPage() {
           onCompleted={handleCheckoutComplete}
         />
       )}
-      <InvoiceDialog invoice={finalInvoice} onClose={() => setFinalInvoice(null)} />
+      <InvoiceDialog
+        invoice={finalInvoice}
+        onClose={() => setFinalInvoice(null)}
+      />
     </div>
   );
 }

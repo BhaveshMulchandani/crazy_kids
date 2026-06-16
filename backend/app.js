@@ -6,6 +6,7 @@ const menuroutes = require('./routes/menu.routes')
 const offerroutes = require('./routes/offer.routes')
 const priceroutes = require('./routes/prices.routes')
 const sessionroutes = require('./routes/session.routes')
+const caferoutes = require('./routes/cafe.routes')
 const cors = require('cors');
 const cookieParser = require("cookie-parser");
 
@@ -27,6 +28,8 @@ app.use('/menu',menuroutes)
 app.use('/offers',offerroutes)
 app.use('/price',priceroutes)
 app.use('/session',sessionroutes)
+app.use('/cafe',caferoutes)
+
 
 
 
