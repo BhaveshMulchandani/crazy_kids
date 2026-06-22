@@ -12,7 +12,7 @@ const cookieParser = require("cookie-parser");
 
 app.use(
   cors({
-    origin: "https://crazy-kids-psi.vercel.app/",
+    origin: "https://crazy-kids-psi.vercel.app",
     credentials: true,
   })
 );
