@@ -152,7 +152,7 @@ function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
         </DialogHeader>
         <div id="cafe-receipt" style={{ fontFamily: "'Courier New', monospace", fontSize: 12, color: "#000", padding: 8 }}>
           <div className="text-center" style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>PLAYKIT CAFE</div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>CRAZIKIDS CAFE</div>
             <div>KOT #{kotNumber}</div>
             <div>{createdAt.toLocaleString()}</div>
           </div>

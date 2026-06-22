@@ -44,7 +44,7 @@ export default function Adminsidenav() {
         </div>
 
         <div>
-          <h2 className="font-semibold tracking-tight">Crazy Kids</h2>
+          {/* <h2 className="font-semibold tracking-tight">Crazy Kids</h2> */}
 
           <p className="text-xs text-white/50">Desk Suite</p>
         </div>

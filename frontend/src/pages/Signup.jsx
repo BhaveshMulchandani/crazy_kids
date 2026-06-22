@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Sparkles } from "lucide-react";
+// import { Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
 import axios from "axios"
 import { useNavigate } from "react-router-dom";
@@ -31,12 +31,12 @@ export default function Signup() {
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 opacity-90" />
 
         <div className="relative z-10 flex h-full w-full flex-col justify-between gap-10">
-          <div>
+          {/* <div>
             <div className="inline-flex items-center gap-3 rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold shadow-lg shadow-slate-950/20 backdrop-blur-md">
               <Sparkles className="h-5 w-5" />
               Crazy Kids
             </div>
-          </div>
+          </div> */}
 
           <div className="space-y-6">
             <h1 className="text-4xl font-semibold leading-tight md:text-5xl">
@@ -69,9 +69,9 @@ export default function Signup() {
             </div>
           </div>
 
-          <p className="text-xs text-slate-400">
+          {/* <p className="text-xs text-slate-400">
             © Crazy Kids
-          </p>
+          </p> */}
         </div>
       </div>
 
