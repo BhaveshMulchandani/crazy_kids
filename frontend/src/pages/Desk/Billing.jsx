@@ -14,7 +14,7 @@ import {
 
 // Mock data removed — Billing now uses backend session creation
 
-const API_BASE = "http://localhost:3000";
+const API_BASE =`${import.meta.env.VITE_API_URL}`;
 
 // pricing settings are managed centrally; Billing only needs socks flag
 

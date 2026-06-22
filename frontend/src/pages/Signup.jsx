@@ -14,7 +14,7 @@ export default function Signup() {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    const response = await axios.post("http://localhost:3000/users/register",{email,password})
+    const response = await axios.post(`${import.meta.env.VITE_API_URL}/users/register`,{email,password})
 
     if(response.status === 201){
       navigate("/")

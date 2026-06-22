@@ -217,7 +217,7 @@ function Cafepos() {
     const fetchMenu = async () => {
       setLoadingMenu(true);
       try {
-        const response = await axios.get("http://localhost:3000/menu/getall", { withCredentials: true });
+        const response = await axios.get(`${import.meta.env.VITE_API_URL}/menu/getall`, { withCredentials: true });
         const apiMenu = response?.data?.menu ?? response?.data ?? [];
         if (Array.isArray(apiMenu)) {
           setMenu(
@@ -259,7 +259,7 @@ function Cafepos() {
     setCustomer(null);
     try {
       const res = await axios.get(
-        `http://localhost:3000/cafe/search?q=${encodeURIComponent(q)}`,
+        `${import.meta.env.VITE_API_URL}/cafe/search?q=${encodeURIComponent(q)}`,
         { withCredentials: true },
       );
       const sessions = res.data.sessions ?? res.data ?? [];
@@ -339,7 +339,7 @@ function Cafepos() {
 });
 
       const createRes = await axios.post(
-        "http://localhost:3000/cafe/create",
+        `${import.meta.env.VITE_API_URL}/cafe/create`,
         {
           sessionId: customer._id,
           tableNumber: tableNumber.trim(),
@@ -359,7 +359,7 @@ function Cafepos() {
 
       let fullKot = createdKot;
       try {
-        const kotRes = await axios.get(`http://localhost:3000/cafe/kot/${kotId}`, {
+        const kotRes = await axios.get(`${import.meta.env.VITE_API_URL}/cafe/kot/${kotId}`, {
           withCredentials: true,
         });
         fullKot = kotRes.data.kot ?? kotRes.data ?? createdKot;

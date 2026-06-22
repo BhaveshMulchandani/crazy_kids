@@ -479,7 +479,7 @@ function Cafemenu() {
   const fetchMenus = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await axios.get("http://localhost:3000/menu/getall");
+      const response = await axios.get(`${import.meta.env.VITE_API_URL}/menu/getall`);
       setItems(response.data?.menu ?? []);
     } catch (error) {
       console.error(error);
@@ -516,7 +516,7 @@ function Cafemenu() {
     try {
       if (form._id) {
         await axios.put(
-          `http://localhost:3000/menu/update/${form._id}`,
+          `${import.meta.env.VITE_API_URL}/menu/update/${form._id}`,
           {
             name: form.name,
             category: form.category,
@@ -539,7 +539,7 @@ function Cafemenu() {
           payload.image = form.image;
         }
 
-        await axios.post("http://localhost:3000/menu/create", payload, {
+        await axios.post(`${import.meta.env.VITE_API_URL}/menu/create`, payload, {
           withCredentials: true,
         });
       }
@@ -558,7 +558,7 @@ function Cafemenu() {
 
   const removeItem = async (_id) => {
     try {
-      await axios.delete(`http://localhost:3000/menu/delete/${_id}`, {
+      await axios.delete(`${import.meta.env.VITE_API_URL}/menu/delete/${_id}`, {
         withCredentials: true,
       });
       await fetchMenus();
@@ -575,7 +575,7 @@ function Cafemenu() {
   const toggleAvailability = async (item) => {
     try {
       await axios.put(
-        `http://localhost:3000/menu/update/${item._id}`,
+        `${import.meta.env.VITE_API_URL}/menu/update/${item._id}`,
         {
           name: item.name,
           category: item.category,

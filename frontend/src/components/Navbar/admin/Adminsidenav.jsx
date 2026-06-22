@@ -22,7 +22,7 @@ export default function Adminsidenav() {
   const navigate = useNavigate();
 
   const handlelogout = async () => {
-    let response = await axios.post("http://localhost:3000/users/logout", {
+    let response = await axios.post(`${import.meta.env.VITE_API_URL}/users/logout`, {
       withCredentials: true,
     });
 

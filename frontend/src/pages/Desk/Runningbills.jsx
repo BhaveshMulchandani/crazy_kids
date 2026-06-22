@@ -723,7 +723,7 @@ function SessionsPage() {
   const loadSessions = async () => {
     try {
       const bookedRes = await axios.get(
-        "http://localhost:3000/session/booked",
+        `${import.meta.env.VITE_API_URL}/session/booked`,
         { withCredentials: true },
       );
 
@@ -731,7 +731,7 @@ function SessionsPage() {
 
       try {
         const runningRes = await axios.get(
-          "http://localhost:3000/session/running",
+          `${import.meta.env.VITE_API_URL}/session/running`,
           { withCredentials: true },
         );
 
@@ -764,7 +764,7 @@ function SessionsPage() {
       completingRef.current.add(b._id);
       try {
         await axios.patch(
-          `http://localhost:3000/session/complete/${b._id}`,
+          `${import.meta.env.VITE_API_URL}/session/complete/${b._id}`,
           {},
           { withCredentials: true },
         );
@@ -786,7 +786,7 @@ function SessionsPage() {
   const pause = async (b) => {
     try {
       await axios.patch(
-        `http://localhost:3000/session/pause/${b._id}`,
+        `${import.meta.env.VITE_API_URL}/session/pause/${b._id}`,
         {},
         { withCredentials: true },
       );
@@ -801,7 +801,7 @@ function SessionsPage() {
   const resume = async (b) => {
     try {
       await axios.patch(
-        `http://localhost:3000/session/resume/${b._id}`,
+        `${import.meta.env.VITE_API_URL}/session/resume/${b._id}`,
         {},
         { withCredentials: true },
       );
@@ -818,7 +818,7 @@ function SessionsPage() {
   const startSession = async (b) => {
     try {
       await axios.patch(
-        `http://localhost:3000/session/start/${b._id}`,
+        `${import.meta.env.VITE_API_URL}/session/start/${b._id}`,
         {},
         { withCredentials: true },
       );
@@ -833,7 +833,7 @@ function SessionsPage() {
   const extendHour = async (b) => {
     try {
       await axios.patch(
-        `http://localhost:3000/session/extend/${b._id}`,
+        `${import.meta.env.VITE_API_URL}/session/extend/${b._id}`,
         {},
         { withCredentials: true },
       );
