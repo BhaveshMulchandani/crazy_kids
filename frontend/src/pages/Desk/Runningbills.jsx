@@ -482,7 +482,7 @@ const CheckoutDialog = ({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg bg-white">
         <DialogHeader>
           <DialogTitle>Checkout · {bill.parentName}</DialogTitle>
         </DialogHeader>
@@ -567,7 +567,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
   return (
     <Dialog open={!!invoice} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto bg-white">
         <DialogHeader>
           <DialogTitle>Invoice {invoice.invoice_no}</DialogTitle>
         </DialogHeader>
@@ -687,7 +687,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               color: "#666",
             }}
           >
-            Thank you for visiting PlayKit!
+            Thank you for visiting!
           </div>
         </div>
         <DialogFooter>
