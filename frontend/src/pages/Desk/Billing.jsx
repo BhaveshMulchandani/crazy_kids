@@ -9,16 +9,28 @@ import {
   Plus,
   X,
   Baby,
-  Wand2,
 } from "lucide-react";
 
 // Mock data removed — Billing now uses backend session creation
 
-const API_BASE =`${import.meta.env.VITE_API_URL}`;
+const API_BASE = `${import.meta.env.VITE_API_URL}`;
 
 // pricing settings are managed centrally; Billing only needs socks flag
 
 // Helper function to calculate age in years
+
+const isBirthdayToday = (dob) => {
+  if (!dob) return false;
+
+  const today = new Date();
+  const birthDate = new Date(dob);
+
+  return (
+    today.getDate() === birthDate.getDate() &&
+    today.getMonth() === birthDate.getMonth()
+  );
+};
+
 const ageInYears = (dob) => {
   if (!dob) return null;
   const today = new Date();
@@ -32,6 +44,28 @@ const ageInYears = (dob) => {
     age--;
   }
   return age;
+};
+
+const calculateEstimatedSessionCharge = (children, pricingSettings) => {
+  const subtotal = (children || []).reduce((total, child) => {
+    if (!child?.name?.trim() || !child?.dob) return total;
+
+    const age = ageInYears(child.dob);
+    const isUnder3 = age !== null && age < 3;
+    const firstHourRate = isUnder3
+      ? Number(pricingSettings?.firstHourUnder3 ?? 0)
+      : Number(pricingSettings?.firstHourAbove3 ?? 0);
+    const extensionRate = isUnder3
+      ? Number(pricingSettings?.extensionUnder3 ?? 0)
+      : Number(pricingSettings?.extensionAbove3 ?? 0);
+    const hours = 1;
+
+    return total + firstHourRate + Math.max(hours - 1, 0) * extensionRate;
+  }, 0);
+
+  return {
+    total:subtotal
+  };
 };
 
 // UI Components
@@ -110,10 +144,10 @@ const Switch = ({ checked = false, onCheckedChange, disabled, ...props }) => {
       {...props}
     >
       <span
-  className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-lg transition-transform ${
-    checked ? "translate-x-4" : "translate-x-0"
-  }`}
-/>
+        className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-lg transition-transform ${
+          checked ? "translate-x-4" : "translate-x-0"
+        }`}
+      />
     </button>
   );
 };
@@ -121,6 +155,7 @@ const Switch = ({ checked = false, onCheckedChange, disabled, ...props }) => {
 function BillingPage() {
   const [lookup, setLookup] = useState("");
   const [customer, setCustomer] = useState(null);
+  const [searchResults, setSearchResults] = useState([]);
   const [parentName, setParentName] = useState("");
   const [mobile, setMobile] = useState("");
   const [children, setChildren] = useState([{ name: "", dob: "" }]);
@@ -131,6 +166,14 @@ function BillingPage() {
   const [offers, setOffers] = useState([]);
   const [reference, setReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [pricingSettings, setPricingSettings] = useState(null);
+  const [paymentStatus, setPaymentStatus] = useState("pending");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [paymentBreakdown, setPaymentBreakdown] = useState([
+    { method: "cash", amount: "" },
+  ]);
+  const [amountPaid, setAmountPaid] = useState("");
+  const [errors, setErrors] = useState({});
 
   useEffect(() => {
     let mounted = true;
@@ -155,7 +198,21 @@ function BillingPage() {
       }
     };
 
+    const loadPricingSettings = async () => {
+      try {
+        const response = await axios.get(`${API_BASE}/price/prices`, {
+          withCredentials: true,
+        });
+        if (mounted) {
+          setPricingSettings(response.data || null);
+        }
+      } catch (error) {
+        console.warn("Unable to load pricing settings", error);
+      }
+    };
+
     loadOffers();
+    loadPricingSettings();
     return () => {
       mounted = false;
     };
@@ -173,41 +230,160 @@ function BillingPage() {
     setChildren(children.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
   };
 
-  const findCustomer = () => {
-    // TODO: implement backend customer search API
-    toast.info("Customer search not implemented — TODO: backend search");
+  const updateBreakdownItem = (index, patch) => {
+    setPaymentBreakdown((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)),
+    );
+  };
+
+  const addBreakdownItem = () => {
+    setPaymentBreakdown((prev) => [...prev, { method: "cash", amount: "" }]);
+  };
+
+  const removeBreakdownItem = (index) => {
+    setPaymentBreakdown((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const applyCustomer = (selectedCustomer) => {
+    if (!selectedCustomer) return;
+
+    setCustomer(selectedCustomer);
+    setParentName(selectedCustomer.parentName || "");
+    setMobile(selectedCustomer.mobileNumber || "");
+    setBandNumber(selectedCustomer.bandNumber || "");
+    setReference(selectedCustomer.reference || "");
+    setNotes(selectedCustomer.notes || "");
+
+    const mappedChildren = (selectedCustomer.children || []).map((child) => ({
+      name: child.name || "",
+      dob: child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "",
+    }));
+
+    setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "" }]);
+    setSearchResults([]);
+    setErrors((prev) => ({ ...prev, parentName: "", mobile: "" }));
+  };
+
+  const findCustomer = async () => {
+    const query = lookup.trim();
+    if (!query) {
+      toast.error("Enter a mobile number, parent name, or band number");
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_BASE}/session/billing/search`, {
+        params: { q: query },
+        withCredentials: true,
+      });
+
+      const customers = response.data?.customers || [];
+      setSearchResults(customers);
+
+      if (customers.length === 0) {
+        setCustomer(null);
+        toast.info("No matching customer found");
+        return;
+      }
+
+      if (customers.length === 1) {
+        applyCustomer(customers[0]);
+        toast.success("Customer loaded");
+        return;
+      }
+
+      toast.info(`Found ${customers.length} matching customers`);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Unable to search customer");
+    }
+  };
+
+  const validateForm = () => {
+    const nextErrors = {};
+
+    if (!parentName.trim()) {
+      nextErrors.parentName = "Parent name is required";
+    }
+
+    if (!mobile.trim()) {
+      nextErrors.mobile = "Mobile number is required";
+    } else if (mobile.trim().length < 10) {
+      nextErrors.mobile = "Mobile number must be at least 10 digits";
+    }
+
+    const validChildren = children.filter((child) => child.name.trim() && child.dob);
+    if (validChildren.length < 1) {
+      nextErrors.children = "Add at least one child with name and DOB";
+    } else {
+      children.forEach((child, index) => {
+        if (!child.name.trim()) {
+          nextErrors[`child-${index}-name`] = "Child name is required";
+        }
+        if (!child.dob) {
+          nextErrors[`child-${index}-dob`] = "Child DOB is required";
+        }
+      });
+    }
+
+    if (paymentStatus === "paid") {
+      if (!amountPaid || Number(amountPaid) <= 0) {
+        nextErrors.amountPaid = "Amount paid is required";
+      }
+    }
+
+    if (paymentStatus === "partially_paid") {
+      const totalPaid = paymentBreakdown.reduce(
+        (sum, entry) => sum + (Number(entry.amount) || 0),
+        0,
+      );
+      if (totalPaid <= 0) {
+        nextErrors.paymentBreakdown = "Add at least one payment split";
+      }
+    }
+
+    return nextErrors;
   };
 
   const submit = async () => {
-    if (!parentName || !mobile) {
-      toast.error("Parent name & mobile required");
-      return;
-    }
+    const validationErrors = validateForm();
+    setErrors(validationErrors);
 
-    const valid = children.filter((c) => c.name.trim() && c.dob);
-    if (valid.length < 1) {
-      toast.error("Add at least one child with DOB");
-      return;
-    }
-    if (valid.length > 5) {
-      toast.error("Max 5 children");
+    if (Object.keys(validationErrors).length > 0) {
+      toast.error("Please complete the required fields");
       return;
     }
 
     setSubmitting(true);
 
     try {
-      // Build payload for backend session creation
-      const validChildren = valid.map((c) => ({
-        name: c.name.trim(),
-        dob: c.dob,
-      }));
+      const validChildrenPayload = validChildren
+        .filter((c) => c.name.trim() && c.dob)
+        .map((c) => ({
+          name: c.name.trim(),
+          dob: c.dob,
+        }));
+
+      const sessionCharge = calculateEstimatedSessionCharge(
+        validChildrenPayload,
+        pricingSettings,
+      );
+      const paidAmount =
+        paymentStatus === "paid"
+          ? Number(amountPaid) || sessionCharge.total
+          : paymentStatus === "partially_paid"
+            ? paymentBreakdown.reduce(
+                (sum, entry) => sum + (Number(entry.amount) || 0),
+                0,
+              )
+            : 0;
+      const balanceAmount = Math.max(sessionCharge.total - paidAmount, 0);
+
       const payload = {
         parentName,
         mobileNumber: mobile,
         bandNumber,
 
-        children: validChildren,
+        children: validChildrenPayload,
 
         offer: offerId === "none" ? null : offerId,
 
@@ -216,6 +392,21 @@ function BillingPage() {
         socksRequired: socks,
 
         notes,
+        paymentStatus,
+        paymentMethod: paymentStatus === "paid" ? paymentMethod : "cash",
+        paymentBreakdown:
+          paymentStatus === "partially_paid"
+            ? paymentBreakdown
+                .filter((entry) => Number(entry.amount) > 0)
+                .map((entry) => ({
+                  method: entry.method || "cash",
+                  amount: Number(entry.amount) || 0,
+                }))
+            : paymentStatus === "paid"
+              ? [{ method: paymentMethod, amount: paidAmount }]
+              : [],
+        amountPaid: paidAmount,
+        balanceAmount,
       };
 
       const resp = await axios.post(`${API_BASE}/session/create`, payload, {
@@ -237,13 +428,25 @@ function BillingPage() {
     setParentName("");
     setMobile("");
     setLookup("");
+    setSearchResults([]);
     setChildren([{ name: "", dob: "" }]);
     setBandNumber("");
     setOfferId("none");
     setReference("");
     setSocks(false);
     setNotes("");
+    setPaymentStatus("pending");
+    setPaymentMethod("cash");
+    setPaymentBreakdown([{ method: "cash", amount: "" }]);
+    setAmountPaid("");
+    setErrors({});
   };
+
+  const validChildren = children.filter((c) => c.name.trim() && c.dob);
+  const estimatedCharge = calculateEstimatedSessionCharge(
+    validChildren,
+    pricingSettings,
+  );
 
   return (
     <div className="space-y-6 px-6 py-8">
@@ -268,6 +471,23 @@ function BillingPage() {
               placeholder="Mobile, Customer ID or Parent Name"
               onKeyDown={(e) => e.key === "Enter" && findCustomer()}
             />
+            {searchResults.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full rounded-lg border bg-background shadow-lg">
+                {searchResults.map((result) => (
+                  <button
+                    key={result._id}
+                    type="button"
+                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-secondary"
+                    onClick={() => applyCustomer(result)}
+                  >
+                    <span>
+                      {result.parentName} · {result.mobileNumber}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{result.sessionNumber}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <Button
             onClick={findCustomer}
@@ -294,26 +514,34 @@ function BillingPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="gap-6">
         <div className="col-span-2 surface-card p-8 space-y-6">
           <div className="grid grid-cols-3 gap-5">
             <div className="space-y-2">
               <Label>Parent Name *</Label>
               <Input
                 value={parentName}
-                onChange={(e) => setParentName(e.target.value)}
+                onChange={(e) => {
+                  setParentName(e.target.value);
+                  setErrors((prev) => ({ ...prev, parentName: "" }));
+                }}
+                className={errors.parentName ? "border-red-500" : ""}
                 placeholder="Riya Sharma"
               />
+              {errors.parentName && <p className="text-xs text-red-500">{errors.parentName}</p>}
             </div>
             <div className="space-y-2">
               <Label>Mobile *</Label>
               <Input
                 value={mobile}
-                onChange={(e) =>
-                  setMobile(e.target.value.replace(/\D/g, "").slice(0, 15))
-                }
+                onChange={(e) => {
+                  setMobile(e.target.value.replace(/\D/g, "").slice(0,11));
+                  setErrors((prev) => ({ ...prev, mobile: "" }));
+                }}
+                className={errors.mobile ? "border-red-500" : ""}
                 placeholder="98XXXXXXXX"
               />
+              {errors.mobile && <p className="text-xs text-red-500">{errors.mobile}</p>}
             </div>
             <div className="space-y-2">
               <Label>Band Number (optional)</Label>
@@ -337,6 +565,8 @@ function BillingPage() {
             <div className="space-y-2">
               {children.map((c, i) => {
                 const age = c.dob ? ageInYears(c.dob) : null;
+                const childNameError = errors[`child-${i}-name`];
+                const childDobError = errors[`child-${i}-dob`];
                 return (
                   <div
                     key={i}
@@ -346,21 +576,33 @@ function BillingPage() {
                       <Input
                         placeholder="Child name"
                         value={c.name}
-                        onChange={(e) =>
-                          updateChild(i, { name: e.target.value })
-                        }
+                        onChange={(e) => {
+                          updateChild(i, { name: e.target.value });
+                          setErrors((prev) => ({ ...prev, [`child-${i}-name`]: "" }));
+                        }}
+                        className={childNameError ? "border-red-500" : ""}
                       />
+                      {childNameError && <p className="mt-1 text-xs text-red-500">{childNameError}</p>}
                     </div>
-                    <div className="col-span-4">
-                      <Input
-                        type="date"
-                        value={c.dob}
-                        onChange={(e) =>
-                          updateChild(i, { dob: e.target.value })
-                        }
-                        max={new Date().toISOString().slice(0, 10)}
-                      />
-                    </div>
+                      <div className="col-span-4">
+                        {isBirthdayToday(c.dob) && (
+                          <div className="mb-2 rounded-md bg-pink-100 border border-pink-300 px-3 py-2 text-sm font-semibold text-pink-700">
+                             🎉 Today is {c.name ? `${c.name}'s Birthday!` : "this child's Birthday!"} 
+                          </div>
+                        )}
+
+                        <Input
+                          type="date"
+                          value={c.dob}
+                          onChange={(e) => {
+                            updateChild(i, { dob: e.target.value });
+                            setErrors((prev) => ({ ...prev, [`child-${i}-dob`]: "" }));
+                          }}
+                          className={childDobError ? "border-red-500" : ""}
+                          max={new Date().toISOString().slice(0, 10)}
+                        />
+                        {childDobError && <p className="mt-1 text-xs text-red-500">{childDobError}</p>}
+                      </div>
                     <div className="col-span-2 text-sm text-center">
                       {age !== null ? (
                         <span
@@ -425,16 +667,16 @@ function BillingPage() {
 
           <div className="grid grid-cols-2 gap-5">
             <div className="space-y-2">
-              <Label>Socks Required?</Label>
-              <div className="h-10 flex items-center gap-3 px-4 rounded-lg border bg-secondary/50">
-                <Switch
-                  checked={socks}
-                  onCheckedChange={setSocks}
-                />
-                <span className="text-sm">
-                  {socks ? "Yes — added to bill" : "No"}
-                </span>
-              </div>
+              <Label>Payment status</Label>
+              <select
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={paymentStatus}
+                onChange={(e) => setPaymentStatus(e.target.value)}
+              >
+                <option value="pending">Pending</option>
+                <option value="paid">Paid</option>
+                <option value="partially_paid">Partially paid</option>
+              </select>
             </div>
             <div className="space-y-2">
               <Label>Notes (optional)</Label>
@@ -443,6 +685,115 @@ function BillingPage() {
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Birthday, special request…"
               />
+            </div>
+          </div>
+
+          {paymentStatus === "paid" && (
+            <div className="grid grid-cols-2 gap-5">
+              <div className="space-y-2">
+                <Label>Payment method</Label>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                  <option value="card">Card</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Amount paid (₹)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={amountPaid}
+                  onChange={(e) => {
+                    setAmountPaid(e.target.value);
+                    setErrors((prev) => ({ ...prev, amountPaid: "" }));
+                  }}
+                  className={errors.amountPaid ? "border-red-500" : ""}
+                  placeholder={estimatedCharge.total.toString()}
+                />
+                {errors.amountPaid && <p className="text-xs text-red-500">{errors.amountPaid}</p>}
+              </div>
+            </div>
+          )}
+
+          {paymentStatus === "partially_paid" && (
+            <div className="space-y-3 rounded-xl border bg-secondary/30 p-4">
+              <div className="flex items-center justify-between">
+                <Label>Payment splits</Label>
+                <Button size="sm" variant="outline" onClick={addBreakdownItem}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Add split
+                </Button>
+              </div>
+              {paymentBreakdown.map((entry, index) => (
+                <div
+                  key={index}
+                  className="grid grid-cols-[1.2fr_1fr_auto] gap-2"
+                >
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={entry.method}
+                    onChange={(e) =>
+                      updateBreakdownItem(index, { method: e.target.value })
+                    }
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                    <option value="card">Card</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={entry.amount}
+                    onChange={(e) =>
+                      updateBreakdownItem(index, { amount: e.target.value })
+                    }
+                    placeholder="Amount"
+                  />
+                  {paymentBreakdown.length > 1 && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => removeBreakdownItem(index)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <div className="text-xs text-muted-foreground">
+                Paid: ₹
+                {paymentBreakdown
+                  .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
+                  .toLocaleString()}{" "}
+                · Balance: ₹
+                {Math.max(
+                  estimatedCharge.total -
+                    paymentBreakdown.reduce(
+                      (sum, entry) => sum + (Number(entry.amount) || 0),
+                      0,
+                    ),
+                  0,
+                ).toLocaleString()}
+              </div>
+              {errors.paymentBreakdown && <p className="text-xs text-red-500">{errors.paymentBreakdown}</p>}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-5">
+            <div className="space-y-2">
+              <Label>Socks Required?</Label>
+              <div className="h-10 flex items-center gap-3 px-4 rounded-lg border bg-secondary/50">
+                <Switch checked={socks} onCheckedChange={setSocks} />
+                <span className="text-sm">
+                  {socks ? "Yes — added to bill" : "No"}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -461,26 +812,6 @@ function BillingPage() {
               Reset
             </Button>
           </div>
-        </div>
-
-        <div className="surface-card p-8 sticky top-24 h-fit">
-          <div className="flex items-center gap-2 mb-4">
-            <Wand2 className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold">How billing works</h3>
-          </div>
-          <ol className="text-sm space-y-3 text-muted-foreground list-decimal pl-4">
-            <li>
-              <span className="text-foreground font-medium">Book session</span>{" "}
-              — opens a running bill, timer begins.
-            </li>
-            <li>Charges accrue per child by age tier (under 3 / 3+).</li>
-            <li>Add cafe items anytime — they join the same bill.</li>
-            <li>Pause / resume freely. Paused time isn't charged.</li>
-            <li>
-              <span className="text-foreground font-medium">Checkout</span> on
-              the Sessions screen — one final invoice.
-            </li>
-          </ol>
         </div>
       </div>
     </div>

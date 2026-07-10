@@ -21,6 +21,10 @@ const itemSchema = new mongoose.Schema({
     default: "",
   },
 
+  subtotal: Number,
+
+  taxAmount: Number,
+
   total: Number,
 });
 
@@ -48,6 +52,11 @@ const kotSchema = new mongoose.Schema(
     totalAmount: {
       type: Number,
       required: true,
+    },
+
+    taxAmount: {
+      type: Number,
+      default: 0,
     },
 
     status: {

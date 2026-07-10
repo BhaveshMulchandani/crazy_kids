@@ -4,9 +4,9 @@ const sessionmodel = require("../models/session.model");
 
 const searchCustomer = async (req, res) => {
   try {
-    const { q } = req.query;
+    const q = req.query.q?.trim();
 
-    if (!q?.trim()) {
+    if (!q) {
       return res.status(400).json({
         message: "Search query is required",
       });
@@ -14,36 +14,30 @@ const searchCustomer = async (req, res) => {
 
     const customers = await sessionmodel
       .find({
-        $or: [
-          {
-            parentName: {
-              $regex: q,
-              $options: "i",
-            },
-          },
-          {
-            mobileNumber: {
-              $regex: q,
-              $options: "i",
-            },
-          },
-          {
-            bandNumber: {
-              $regex: q,
-              $options: "i",
-            },
-          },
-        ],
         status: {
           $in: ["running", "paused"],
         },
+        $or: [
+          {
+            parentName: {
+              $regex: `^${q}$`,
+              $options: "i",
+            },
+          },
+          {
+            mobileNumber: q,
+          },
+          {
+            bandNumber: q,
+          },
+        ],
       })
       .select(
         "_id sessionNumber parentName mobileNumber bandNumber children"
       );
 
     return res.status(200).json({
-      sessions: customers
+      sessions: customers,
     });
   } catch (error) {
     return res.status(500).json({
@@ -51,8 +45,6 @@ const searchCustomer = async (req, res) => {
     });
   }
 };
-
-
 
 const createKOT = async (req, res) => {
   try {

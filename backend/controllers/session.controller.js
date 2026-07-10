@@ -16,12 +16,24 @@ const calculateAge = (dob) => {
     monthDiff < 0 ||
     (monthDiff === 0 &&
       today.getDate() <
-        birthDate.getDate())
+      birthDate.getDate())
   ) {
     age--;
   }
 
   return age;
+};
+
+const isBirthdayToday = (dob) => {
+  if (!dob) return false;
+
+  const today = new Date();
+  const birthDate = new Date(dob);
+
+  return (
+    today.getDate() === birthDate.getDate() &&
+    today.getMonth() === birthDate.getMonth()
+  );
 };
 
 const createsession = async (
@@ -38,6 +50,10 @@ const createsession = async (
       reference,
       socksRequired,
       notes,
+      paymentStatus,
+      paymentMethod,
+      paymentBreakdown,
+      amountPaid,
     } = req.body;
 
     // Validations
@@ -123,6 +139,23 @@ const createsession = async (
         notes:
           notes?.trim() || "",
 
+        paymentStatus:
+          ["pending", "paid", "partially_paid"].includes(paymentStatus)
+            ? paymentStatus
+            : "pending",
+
+        paymentMethod:
+          paymentMethod?.trim() || "cash",
+
+        paymentBreakdown: Array.isArray(paymentBreakdown)
+          ? paymentBreakdown.map((entry) => ({
+            method: entry?.method?.trim() || "cash",
+            amount: Number(entry?.amount) || 0,
+          }))
+          : [],
+
+        amountPaid: Number(amountPaid) || 0,
+
         bookedHours: 1,
         extendedHours: 0,
         totalHours: 1,
@@ -151,10 +184,21 @@ const bookedsession = async (req, res) => {
       .populate("offer")
       .sort({ createdAt: -1 });
 
+    const updatedSessions = sessions.map((session) => {
+      const sessionObj = session.toObject();
+
+      sessionObj.children = sessionObj.children.map((child) => ({
+        ...child,
+        isBirthdayToday: isBirthdayToday(child.dob),
+      }));
+
+      return sessionObj;
+    });
+
     return res.status(200).json({
       message: "Booked sessions fetched successfully",
-      count: sessions.length,
-      sessions,
+      count: updatedSessions.length,
+      sessions: updatedSessions,
     });
   } catch (error) {
     return res.status(500).json({
@@ -188,7 +232,7 @@ const startsession = async (req, res) => {
 
     session.scheduledEndTime = new Date(
       now.getTime() +
-        session.totalHours * 60 * 60 * 1000
+      session.totalHours * 60 * 60 * 1000
     );
 
     session.status = "running";
@@ -263,7 +307,7 @@ const resumesession = async (req, res) => {
 
     const lastPause =
       session.pauseHistory[
-        session.pauseHistory.length - 1
+      session.pauseHistory.length - 1
       ];
 
     if (!lastPause || !lastPause.pausedAt) {
@@ -278,7 +322,7 @@ const resumesession = async (req, res) => {
 
     const pausedMinutes = Math.ceil(
       (resumedAt - lastPause.pausedAt) /
-        (1000 * 60)
+      (1000 * 60)
     );
 
     session.totalPausedMinutes +=
@@ -286,7 +330,7 @@ const resumesession = async (req, res) => {
 
     session.scheduledEndTime = new Date(
       session.scheduledEndTime.getTime() +
-        pausedMinutes * 60 * 1000
+      pausedMinutes * 60 * 1000
     );
 
     session.status = "running";
@@ -336,7 +380,7 @@ const extendsession = async (req, res) => {
 
     session.scheduledEndTime = new Date(
       session.scheduledEndTime.getTime() +
-        60 * 60 * 1000
+      60 * 60 * 1000
     );
 
     await session.save();
@@ -398,11 +442,22 @@ const runningsession = async (req, res) => {
       .populate("offer")
       .sort({ startTime: -1 });
 
+      const updatedSessions = sessions.map((session) => {
+  const sessionObj = session.toObject();
+
+  sessionObj.children = sessionObj.children.map((child) => ({
+    ...child,
+    isBirthdayToday: isBirthdayToday(child.dob),
+  }));
+
+  return sessionObj;
+});
+
     return res.status(200).json({
-      message: "Running sessions fetched successfully",
-      count: sessions.length,
-      sessions,
-    });
+  message: "Running sessions fetched successfully",
+  count: updatedSessions.length,
+  sessions: updatedSessions,
+});
   } catch (error) {
     return res.status(500).json({
       message: "Internal server error",
@@ -433,7 +488,50 @@ const getSessionKOTs = async (
   }
 };
 
+const searchBillingCustomer = async (req, res) => {
+  try {
+    const { q } = req.query;
+
+    if (!q?.trim()) {
+      return res.status(400).json({
+        message: "Search query is required",
+      });
+    }
+
+    const customers = await sessionmodel
+      .find({
+        status: {
+          $in: ["completed"],
+        },
+        $or: [
+          {
+            parentName: {
+              $regex: `^${q.trim()}$`,
+              $options: "i",
+            },
+          },
+          {
+            mobileNumber: q.trim(),
+          }
+        ],
+      })
+      .select(
+        "_id sessionNumber parentName mobileNumber bandNumber children reference notes"
+      )
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      count: customers.length,
+      customers,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
 
 module.exports = {
-  createsession,bookedsession,startsession,pausesession,resumesession,extendsession,completesession,runningsession,getSessionKOTs
+  searchBillingCustomer,createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, runningsession, getSessionKOTs
 };

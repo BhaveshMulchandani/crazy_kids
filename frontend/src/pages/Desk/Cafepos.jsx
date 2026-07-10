@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocation } from "react-router-dom";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -199,6 +200,7 @@ function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
 }
 
 function Cafepos() {
+  const location = useLocation();
   const [search, setSearch] = React.useState("");
   const [customerLookup, setCustomerLookup] = React.useState("");
   const [searchResults, setSearchResults] = React.useState([]);
@@ -212,6 +214,17 @@ function Cafepos() {
   const [cartSnapshot, setCartSnapshot] = React.useState([]);
   const [menu, setMenu] = React.useState([]);
   const [loadingMenu, setLoadingMenu] = React.useState(false);
+  const preSelectedSession = location.state?.session;
+
+  React.useEffect(() => {
+  if (!preSelectedSession) return;
+
+  setCustomer(preSelectedSession);
+
+  setCustomerLookup(
+    preSelectedSession.parentName
+  );
+}, [preSelectedSession]);
 
   React.useEffect(() => {
     const fetchMenu = async () => {
@@ -379,7 +392,6 @@ function Cafepos() {
     }
   };
 
-  
   return (
     <div className="space-y-5 px-6 py-8">
       <div className="flex items-center justify-between">

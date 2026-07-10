@@ -19,7 +19,7 @@ import {
   Clock,
   ChevronDown,
 } from "lucide-react";
-
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 // Helper functions
@@ -36,6 +36,48 @@ const formatHMS = (seconds) => {
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+};
+
+const formatCurrency = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
+
+const calculateSessionCharge = (bill, pricingSettings) => {
+  const children = bill?.children ?? [];
+  const subtotal = children.reduce((total, child) => {
+    const age = child?.age ?? 0;
+    const isUnder3 = age < 3;
+    const firstHourRate = isUnder3
+      ? Number(pricingSettings?.firstHourUnder3 ?? 0)
+      : Number(pricingSettings?.firstHourAbove3 ?? 0);
+    const extensionRate = isUnder3
+      ? Number(pricingSettings?.extensionUnder3 ?? 0)
+      : Number(pricingSettings?.extensionAbove3 ?? 0);
+    return (
+      total +
+      firstHourRate +
+      Math.max((bill?.totalHours ?? 1) - 1, 0) * extensionRate
+    );
+  }, 0);
+
+  const gst = subtotal * 0.18;
+  return {
+    subtotal,
+    gst,
+    total: subtotal + gst,
+  };
+};
+
+const calculateFoodCharge = (bill) => {
+  const kots = bill?.kots ?? [];
+  const subtotal = kots.reduce(
+    (sum, kot) => sum + Number(kot?.totalAmount || 0),
+    0,
+  );
+  const gst = subtotal * 0.05;
+  return {
+    subtotal,
+    gst,
+    total: subtotal + gst,
+  };
 };
 
 // UI Components
@@ -291,10 +333,19 @@ const BillCard = ({
   onCheckout,
   onStart,
   onExtend,
+  pricingSettings,
+  kotsBySession,
 }) => {
   const secs = elapsedSeconds(bill);
   const children = bill.children ?? [];
+  const hasBirthday = children.some((child) => child.isBirthdayToday);
   const paused = bill.status === "paused";
+  const sessionCharge = calculateSessionCharge(bill, pricingSettings);
+  const foodCharge = calculateFoodCharge({
+    ...bill,
+    kots: kotsBySession?.[bill._id] || [],
+  });
+  const total = sessionCharge.total + foodCharge.total;
 
   const getTimerText = () => {
     if (bill.status === "running") {
@@ -309,19 +360,29 @@ const BillCard = ({
     return bill.status || "Not Started";
   };
 
+  const navigate = useNavigate();
+
   return (
     <div
       className={`surface-card p-5 transition-all ${
         paused ? "ring-2 ring-amber-400/60" : ""
-      }`}
+      } ${hasBirthday ? "ring-2 ring-pink-500 bg-pink-50" : ""}`}
     >
       <div className="flex items-start justify-between">
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground font-mono">
             {bill.sessionNumber}
           </div>
-          <div className="font-semibold text-lg leading-tight">
-            {bill.parentName}
+          <div className="flex items-center gap-2">
+            <div className="font-semibold text-lg leading-tight">
+              {bill.parentName}
+            </div>
+
+            {hasBirthday && (
+              <span className="rounded-full bg-pink-600 px-2 py-1 text-xs font-semibold text-white">
+                🎂 Birthday
+              </span>
+            )}
           </div>
           <div className="text-xs text-muted-foreground">
             {bill.mobileNumber}
@@ -351,9 +412,12 @@ const BillCard = ({
         {children.map((c, i) => (
           <span
             key={i}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary text-xs"
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${
+              c.isBirthdayToday ? "bg-pink-600 text-white" : "bg-secondary"
+            }`}
           >
-            <Baby className="h-3 w-3" /> {c.name} · {c.age}y
+            {c.isBirthdayToday ? "🎂" : <Baby className="h-3 w-3" />}
+            {c.name} · {c.age}y
           </span>
         ))}
       </div>
@@ -371,21 +435,35 @@ const BillCard = ({
       <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
         <div className="rounded-lg bg-secondary/50 p-2">
           <div className="text-muted-foreground">Session</div>
-          <div className="font-semibold">--</div>
+          <div className="font-semibold">
+            {formatCurrency(sessionCharge.total)}
+          </div>
         </div>
         <div className="rounded-lg bg-secondary/50 p-2">
           <div className="text-muted-foreground">Cafe</div>
-          <div className="font-semibold">--</div>
+          <div className="font-semibold">
+            {formatCurrency(foodCharge.total)}
+          </div>
         </div>
         <div
           className="rounded-lg p-2"
           style={{ background: "var(--gradient-primary)", color: "white" }}
         >
           <div className="opacity-80">Total</div>
-          <div className="font-semibold">--</div>
+          <div className="font-semibold">{formatCurrency(total)}</div>
         </div>
       </div>
-      {/* Reference, Payment and Pending removed per UI request */}
+      <div className="mt-3 text-xs text-muted-foreground">
+        <div>
+          Payment:{" "}
+          {bill.paymentStatus === "paid"
+            ? "Paid"
+            : bill.paymentStatus === "partially_paid"
+              ? "Partially paid"
+              : "Pending"}
+        </div>
+        <div>Balance: {formatCurrency(bill.balanceAmount ?? total)}</div>
+      </div>
 
       <div className="mt-4 flex gap-2">
         {bill.status === "booked" && (
@@ -423,8 +501,20 @@ const BillCard = ({
 
         {(bill.status === "running" || bill.status === "paused") && (
           <>
-            <Button size="sm" variant="outline" className="flex-1">
-              <Coffee className="h-3.5 w-3.5 mr-1" /> Add cafe
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={() =>
+                navigate("/desk/cafepos", {
+                  state: {
+                    session: bill,
+                  },
+                })
+              }
+            >
+              <Coffee className="h-3.5 w-3.5 mr-1" />
+              Add cafe
             </Button>
 
             <Button
@@ -455,12 +545,20 @@ const CheckoutDialog = ({
   billId,
   bills,
   offers = [],
+  pricingSettings,
+  kotsBySession = {},
   onClose,
   onCompleted,
 }) => {
   const bill = bills.find((b) => b._id === billId);
   const [offerId, setOfferId] = useState("none");
   const [submitting, setSubmitting] = useState(false);
+  const sessionCharge = calculateSessionCharge(bill, pricingSettings);
+  const foodCharge = calculateFoodCharge({
+    ...bill,
+    kots: kotsBySession?.[bill?._id] || [],
+  });
+  const total = sessionCharge.total + foodCharge.total;
 
   if (!bill) return null;
 
@@ -489,14 +587,17 @@ const CheckoutDialog = ({
         <div className="space-y-3 text-sm">
           <Row
             k={`Session (${bill.children?.length ?? 0} child · ${bill.totalHours ?? 0} hr)`}
-            v="--"
+            v={formatCurrency(sessionCharge.total)}
           />
           {bill.children?.map((c, i) => (
             <div key={i} className="text-xs text-muted-foreground pl-3">
-              ↳ {c.name} ({c.age}y): --
+              ↳ {c.name} ({c.age}y):{" "}
+              {formatCurrency(
+                sessionCharge.total / Math.max(bill.children?.length || 1, 1),
+              )}
             </div>
           ))}
-          <Row k="Cafe items" v="--" />
+          <Row k="Cafe items" v={formatCurrency(foodCharge.total)} />
           <div className="h-px bg-border" />
           <div className="space-y-1.5">
             <Label className="text-xs">Apply offer</Label>
@@ -514,14 +615,24 @@ const CheckoutDialog = ({
             <Input type="text" value="--" disabled />
           </div>
           <div className="h-px bg-border" />
-          <Row k="Subtotal" v="--" />
-          <Row k="Discount" v="--" />
+          <Row
+            k="Subtotal"
+            v={formatCurrency(sessionCharge.subtotal + foodCharge.subtotal)}
+          />
+          <Row k="GST" v={formatCurrency(sessionCharge.gst + foodCharge.gst)} />
           <div className="flex justify-between items-baseline pt-1">
             <span className="text-muted-foreground">Final total</span>
-            <span className="text-3xl font-semibold gradient-text">--</span>
+            <span className="text-3xl font-semibold gradient-text">
+              {formatCurrency(total)}
+            </span>
           </div>
           <div className="text-xs text-muted-foreground">
-            Earns -- reward points
+            Payment:{" "}
+            {bill.paymentStatus === "paid"
+              ? "Paid"
+              : bill.paymentStatus === "partially_paid"
+                ? "Partially paid"
+                : "Pending"}
           </div>
         </div>
         <DialogFooter>
@@ -600,7 +711,12 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               <b>Customer:</b> {invoice.sessionNumber}
             </div>
             <div>
-              <b>Paid:</b> --
+              <b>Paid:</b>{" "}
+              {invoice.paymentStatus === "paid"
+                ? "Paid"
+                : invoice.paymentStatus === "partially_paid"
+                  ? "Partially paid"
+                  : "Pending"}
             </div>
           </div>
 
@@ -640,14 +756,18 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             </thead>
             <tbody>
               <tr>
-                <td>Session charges ({ch.length} child)</td>
+                <td>Session charges ({ch.length} child) + 18% GST</td>
                 <td>—</td>
-                <td style={{ textAlign: "right" }}>--</td>
+                <td style={{ textAlign: "right" }}>
+                  {formatCurrency(invoice?.sessionCharge || 0)}
+                </td>
               </tr>
               <tr>
-                <td>Cafe items</td>
+                <td>Cafe items + 5% GST</td>
                 <td>—</td>
-                <td style={{ textAlign: "right" }}>--</td>
+                <td style={{ textAlign: "right" }}>
+                  {formatCurrency(invoice?.foodCharge || 0)}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -661,22 +781,22 @@ const InvoiceDialog = ({ invoice, onClose }) => {
           >
             <div className="row">
               <span>Subtotal</span>
-              <span>--</span>
+              <span>{formatCurrency(invoice?.subtotal || 0)}</span>
             </div>
             <div className="row">
-              <span>Discount</span>
-              <span>--</span>
+              <span>GST</span>
+              <span>{formatCurrency(invoice?.gst || 0)}</span>
             </div>
             <div className="row bold" style={{ fontSize: 18, marginTop: 6 }}>
               <span>TOTAL</span>
-              <span>--</span>
+              <span>{formatCurrency(invoice?.total || 0)}</span>
             </div>
             <div
               className="row"
               style={{ marginTop: 6, color: "#666", fontSize: 12 }}
             >
-              <span>Reward points earned</span>
-              <span>--</span>
+              <span>Balance</span>
+              <span>{formatCurrency(invoice?.balanceAmount ?? 0)}</span>
             </div>
           </div>
           <div
@@ -712,6 +832,8 @@ function SessionsPage() {
   const [finalInvoice, setFinalInvoice] = useState(null);
   const [bills, setBills] = useState([]);
   const [offers, setOffers] = useState([]);
+  const [pricingSettings, setPricingSettings] = useState(null);
+  const [kotsBySession, setKotsBySession] = useState({});
   const completingRef = useRef(new Set());
 
   useEffect(() => {
@@ -719,8 +841,7 @@ function SessionsPage() {
     return () => clearInterval(t);
   }, []);
 
-  // Fetch booked + running sessions and merge into bills state
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     try {
       const bookedRes = await axios.get(
         `${import.meta.env.VITE_API_URL}/session/booked`,
@@ -736,20 +857,55 @@ function SessionsPage() {
         );
 
         runningSessions = runningRes.data.sessions ?? [];
-      } catch (err) {
+      } catch {
         console.log("Running sessions API missing");
       }
 
-      setBills([...(bookedRes.data.sessions ?? []), ...runningSessions]);
+      const allSessions = [
+        ...(bookedRes.data.sessions ?? []),
+        ...runningSessions,
+      ];
+      setBills(allSessions);
+
+      const kotsMap = {};
+      await Promise.all(
+        allSessions.map(async (session) => {
+          try {
+            const res = await axios.get(
+              `${import.meta.env.VITE_API_URL}/cafe/session/${session._id}`,
+              { withCredentials: true },
+            );
+            kotsMap[session._id] = res.data?.kots ?? [];
+          } catch {
+            kotsMap[session._id] = [];
+          }
+        }),
+      );
+      setKotsBySession(kotsMap);
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to load sessions");
     }
-  };
+  }, []);
 
-  // Load on mount
+  useEffect(() => {
+    const loadPricingSettings = async () => {
+      try {
+        const response = await axios.get(
+          `${import.meta.env.VITE_API_URL}/price/prices`,
+          { withCredentials: true },
+        );
+        setPricingSettings(response.data || null);
+      } catch {
+        console.warn("Unable to load pricing settings");
+      }
+    };
+
+    loadPricingSettings();
+  }, []);
+
   useEffect(() => {
     loadSessions();
-  }, []);
+  }, [loadSessions]);
 
   // Auto-complete sessions whose scheduledEndTime has passed
   useEffect(() => {
@@ -846,12 +1002,38 @@ function SessionsPage() {
   };
 
   const handleCheckoutComplete = (completedBill) => {
+    const sessionCharge = calculateSessionCharge(
+      completedBill,
+      pricingSettings,
+    );
+    const foodCharge = calculateFoodCharge({
+      ...completedBill,
+      kots: kotsBySession?.[completedBill._id] || [],
+    });
+
+    const invoiceData = {
+      ...completedBill,
+      sessionCharge: sessionCharge.total,
+      foodCharge: foodCharge.total,
+      subtotal: sessionCharge.subtotal + foodCharge.subtotal,
+      gst: sessionCharge.gst + foodCharge.gst,
+      total: sessionCharge.total + foodCharge.total,
+      balanceAmount:
+        completedBill.balanceAmount ??
+        Math.max(
+          sessionCharge.total +
+            foodCharge.total -
+            (completedBill.amountPaid || 0),
+          0,
+        ),
+    };
+
     setBills((prevBills) => {
       const filtered = prevBills.filter((b) => b._id !== completedBill._id);
       return [completedBill, ...filtered];
     });
     setCheckoutBillId(null);
-    setFinalInvoice(completedBill);
+    setFinalInvoice(invoiceData);
   };
 
   return (
@@ -893,6 +1075,8 @@ function SessionsPage() {
                 onCheckout={() => checkout(b)}
                 onStart={() => startSession(b)}
                 onExtend={() => extendHour(b)}
+                pricingSettings={pricingSettings}
+                kotsBySession={kotsBySession}
               />
             ))}
           </div>
@@ -924,6 +1108,8 @@ function SessionsPage() {
                 onCheckout={() => checkout(b)}
                 onStart={() => startSession(b)}
                 onExtend={() => extendHour(b)}
+                pricingSettings={pricingSettings}
+                kotsBySession={kotsBySession}
               />
             ))}
           </div>
@@ -986,6 +1172,8 @@ function SessionsPage() {
           billId={checkoutBillId}
           bills={bills}
           offers={offers}
+          pricingSettings={pricingSettings}
+          kotsBySession={kotsBySession}
           onClose={() => setCheckoutBillId(null)}
           onCompleted={handleCheckoutComplete}
         />

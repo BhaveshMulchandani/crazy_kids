@@ -97,6 +97,37 @@ const sessionSchema = new mongoose.Schema(
       trim: true,
     },
 
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "paid", "partially_paid"],
+      default: "pending",
+      index: true,
+    },
+
+    paymentMethod: {
+      type: String,
+      default: "cash",
+      trim: true,
+    },
+
+    paymentBreakdown: [
+      {
+        method: {
+          type: String,
+          trim: true,
+        },
+        amount: {
+          type: Number,
+          default: 0,
+        },
+      },
+    ],
+
+    amountPaid: {
+      type: Number,
+      default: 0,
+    },
+
     status: {
       type: String,
       enum: [
