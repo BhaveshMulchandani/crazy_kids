@@ -500,9 +500,9 @@ const completesession = async (req, res) => {
           status: session.paymentStatus || "pending",
           breakdown: Array.isArray(session.paymentBreakdown)
             ? session.paymentBreakdown.map((entry) => ({
-                method: entry?.method || "cash",
-                amount: Number(entry?.amount || 0),
-              }))
+              method: entry?.method || "cash",
+              amount: Number(entry?.amount || 0),
+            }))
             : [],
           amountPaid: Number(session.amountPaid || 0),
           pendingAmount: Math.max(grandTotal - Number(session.amountPaid || 0), 0),
@@ -532,22 +532,22 @@ const runningsession = async (req, res) => {
       .populate("offer")
       .sort({ startTime: -1 });
 
-      const updatedSessions = sessions.map((session) => {
-  const sessionObj = session.toObject();
+    const updatedSessions = sessions.map((session) => {
+      const sessionObj = session.toObject();
 
-  sessionObj.children = sessionObj.children.map((child) => ({
-    ...child,
-    isBirthdayToday: isBirthdayToday(child.dob),
-  }));
+      sessionObj.children = sessionObj.children.map((child) => ({
+        ...child,
+        isBirthdayToday: isBirthdayToday(child.dob),
+      }));
 
-  return sessionObj;
-});
+      return sessionObj;
+    });
 
     return res.status(200).json({
-  message: "Running sessions fetched successfully",
-  count: updatedSessions.length,
-  sessions: updatedSessions,
-});
+      message: "Running sessions fetched successfully",
+      count: updatedSessions.length,
+      sessions: updatedSessions,
+    });
   } catch (error) {
     return res.status(500).json({
       message: "Internal server error",
@@ -623,5 +623,5 @@ const searchBillingCustomer = async (req, res) => {
 
 
 module.exports = {
-  searchBillingCustomer,createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, runningsession, getSessionKOTs
+  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, runningsession, getSessionKOTs
 };

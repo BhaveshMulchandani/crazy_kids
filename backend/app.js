@@ -13,7 +13,7 @@ const cookieParser = require("cookie-parser");
 
 app.use(
   cors({
-    origin:[ "http://localhost:5173","https://crazy-kids-psi.vercel.app","https://pos.sosiyo.com"],
+    origin: ["http://localhost:5173", "https://crazy-kids-psi.vercel.app", "https://pos.sosiyo.com"],
     credentials: true,
   })
 );
@@ -25,16 +25,16 @@ connectDB();
 
 app.use(express.json());
 app.use('/users', userroutes);
-app.use('/menu',menuroutes)
-app.use('/offers',offerroutes)
-app.use('/price',priceroutes)
-app.use('/session',sessionroutes)
-app.use('/cafe',caferoutes)
-app.use('/invoice',invoiceroutes)
+app.use('/menu', menuroutes)
+app.use('/offers', offerroutes)
+app.use('/price', priceroutes)
+app.use('/session', sessionroutes)
+app.use('/cafe', caferoutes)
+app.use('/invoice', invoiceroutes)
 
 
 
 
-app.listen(3000,() => {
-    console.log("server is running on port 3000")
+app.listen(3000, () => {
+  console.log("server is running on port 3000")
 })

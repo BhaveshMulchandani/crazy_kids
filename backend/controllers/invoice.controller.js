@@ -82,9 +82,9 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
       status: session.paymentStatus || "pending",
       breakdown: Array.isArray(session.paymentBreakdown)
         ? session.paymentBreakdown.map((entry) => ({
-            method: entry?.method || "cash",
-            amount: Number(entry?.amount || 0),
-          }))
+          method: entry?.method || "cash",
+          amount: Number(entry?.amount || 0),
+        }))
         : [],
       amountPaid: Number(session.amountPaid || 0),
       pendingAmount: Math.max(grandTotal - Number(session.amountPaid || 0), 0),
