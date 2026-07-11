@@ -1,9 +1,9 @@
 import React, {
   useEffect,
   useState,
-  useRef,
   useCallback,
   useContext,
+  useRef
 } from "react";
 import { toast } from "sonner";
 import {
@@ -40,6 +40,19 @@ const formatHMS = (seconds) => {
 
 const formatCurrency = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
 
+const isBirthdayChild = (child) => {
+  if (child?.isBirthdayToday) return true;
+  if (!child?.dob) return false;
+
+  const birthday = new Date(child.dob);
+  const today = new Date();
+
+  return (
+    today.getDate() === birthday.getDate() &&
+    today.getMonth() === birthday.getMonth()
+  );
+};
+
 const calculateSessionCharge = (bill, pricingSettings) => {
   const children = bill?.children ?? [];
   const subtotal = children.reduce((total, child) => {
@@ -58,12 +71,35 @@ const calculateSessionCharge = (bill, pricingSettings) => {
     );
   }, 0);
 
-  const gst = subtotal * 0.18;
   return {
     subtotal,
-    gst,
-    total: subtotal + gst,
+    total: subtotal,
   };
+};
+
+const getSessionPaymentSummary = (bill, sessionCharge) => {
+  const paymentStatus = bill?.paymentStatus || "pending";
+  const amountPaid = paymentStatus === "pending" ? 0 : Number(bill?.amountPaid || 0);
+  const pendingAmount =
+    paymentStatus === "pending"
+      ? sessionCharge.total
+      : Math.max(sessionCharge.total - amountPaid, 0);
+
+  return {
+    amountPaid,
+    pendingAmount,
+    paymentStatusLabel:
+      paymentStatus === "paid"
+        ? "Paid"
+        : paymentStatus === "partially_paid"
+          ? "Partially Paid"
+          : "Pending",
+  };
+};
+
+const calculateLoyaltyPoints = (amount, pricingSettings) => {
+  const pointsPer100 = Number(pricingSettings?.loyaltyPointsPer100 ?? 10);
+  return Math.floor(Number(amount || 0) / 100) * pointsPer100;
 };
 
 const calculateFoodCharge = (bill) => {
@@ -72,11 +108,9 @@ const calculateFoodCharge = (bill) => {
     (sum, kot) => sum + Number(kot?.totalAmount || 0),
     0,
   );
-  const gst = subtotal * 0.05;
   return {
     subtotal,
-    gst,
-    total: subtotal + gst,
+    total: subtotal,
   };
 };
 
@@ -338,7 +372,8 @@ const BillCard = ({
 }) => {
   const secs = elapsedSeconds(bill);
   const children = bill.children ?? [];
-  const hasBirthday = children.some((child) => child.isBirthdayToday);
+  const birthdayChildren = children.filter((child) => isBirthdayChild(child));
+  const hasBirthday = birthdayChildren.length > 0;
   const paused = bill.status === "paused";
   const sessionCharge = calculateSessionCharge(bill, pricingSettings);
   const foodCharge = calculateFoodCharge({
@@ -346,16 +381,18 @@ const BillCard = ({
     kots: kotsBySession?.[bill._id] || [],
   });
   const total = sessionCharge.total + foodCharge.total;
+  const paymentSummary = getSessionPaymentSummary(bill, sessionCharge);
+
+  const isOverdue = Boolean(
+    bill?.scheduledEndTime && new Date(bill.scheduledEndTime) <= new Date(),
+  );
 
   const getTimerText = () => {
-    if (bill.status === "running") {
-      return formatHMS(secs);
+    if (bill.status === "running" || bill.status === "paused") {
+      return isOverdue ? "Session Over" : formatHMS(secs);
     }
     if (bill.status === "booked") {
       return "Not Started";
-    }
-    if (bill.status === "paused") {
-      return "Paused";
     }
     return bill.status || "Not Started";
   };
@@ -390,11 +427,13 @@ const BillCard = ({
         </div>
         <span
           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-            paused
-              ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-              : bill.status === "booked"
-                ? "bg-blue-500/15 text-blue-700 dark:text-blue-400"
-                : "bg-green-500/15 text-green-700 dark:text-green-400"
+            isOverdue
+              ? "bg-rose-500/15 text-rose-700 dark:text-rose-400"
+              : paused
+                ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                : bill.status === "booked"
+                  ? "bg-blue-500/15 text-blue-700 dark:text-blue-400"
+                  : "bg-green-500/15 text-green-700 dark:text-green-400"
           }`}
         >
           {paused ? (
@@ -404,22 +443,31 @@ const BillCard = ({
           ) : (
             <Timer className="h-3 w-3" />
           )}{" "}
-          {paused ? "Paused" : bill.status === "booked" ? "Booked" : "Active"}
+          {isOverdue
+            ? "Session Over"
+            : paused
+              ? "Paused"
+              : bill.status === "booked"
+                ? "Booked"
+                : "Active"}
         </span>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {children.map((c, i) => (
-          <span
-            key={i}
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${
-              c.isBirthdayToday ? "bg-pink-600 text-white" : "bg-secondary"
-            }`}
-          >
-            {c.isBirthdayToday ? "🎂" : <Baby className="h-3 w-3" />}
-            {c.name} · {c.age}y
-          </span>
-        ))}
+        {children.map((c, i) => {
+          const isBirthday = isBirthdayChild(c);
+          return (
+            <span
+              key={i}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${
+                isBirthday ? "bg-pink-600 text-white" : "bg-secondary"
+              }`}
+            >
+              {isBirthday ? "🎂" : <Baby className="h-3 w-3" />}
+              {c.name} · {c.age}y
+            </span>
+          );
+        })}
       </div>
 
       <div className="mt-4 font-mono text-3xl font-semibold tabular-nums gradient-text">
@@ -453,16 +501,34 @@ const BillCard = ({
           <div className="font-semibold">{formatCurrency(total)}</div>
         </div>
       </div>
-      <div className="mt-3 text-xs text-muted-foreground">
-        <div>
-          Payment:{" "}
-          {bill.paymentStatus === "paid"
-            ? "Paid"
-            : bill.paymentStatus === "partially_paid"
-              ? "Partially paid"
-              : "Pending"}
+      <div className="mt-3 rounded-lg border border-border/60 bg-secondary/40 p-3 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between">
+          <span>Total Session Amount</span>
+          <span className="font-semibold text-foreground">
+            {formatCurrency(sessionCharge.total)}
+          </span>
         </div>
-        <div>Balance: {formatCurrency(bill.balanceAmount ?? total)}</div>
+        <div className="mt-1 flex items-center justify-between">
+          <span>Amount Paid</span>
+          <span className="font-semibold text-foreground">
+            {formatCurrency(paymentSummary.amountPaid)}
+          </span>
+        </div>
+        <div className="mt-1 flex items-center justify-between">
+          <span>Pending Amount</span>
+          <span className="font-semibold text-foreground">
+            {formatCurrency(paymentSummary.pendingAmount)}
+          </span>
+        </div>
+        <div className="mt-1 flex items-center justify-between">
+          <span>Payment Status</span>
+          <span className="font-semibold text-foreground">
+            {paymentSummary.paymentStatusLabel}
+          </span>
+        </div>
+        <div className="mt-2 text-[11px] text-muted-foreground">
+          18% GST Inclusive
+        </div>
       </div>
 
       <div className="mt-4 flex gap-2">
@@ -544,14 +610,12 @@ const BillCard = ({
 const CheckoutDialog = ({
   billId,
   bills,
-  offers = [],
   pricingSettings,
   kotsBySession = {},
   onClose,
   onCompleted,
 }) => {
   const bill = bills.find((b) => b._id === billId);
-  const [offerId, setOfferId] = useState("none");
   const [submitting, setSubmitting] = useState(false);
   const sessionCharge = calculateSessionCharge(bill, pricingSettings);
   const foodCharge = calculateFoodCharge({
@@ -559,23 +623,43 @@ const CheckoutDialog = ({
     kots: kotsBySession?.[bill?._id] || [],
   });
   const total = sessionCharge.total + foodCharge.total;
+  const paymentSummary = getSessionPaymentSummary(bill, { total });
+  const loyaltyPoints = calculateLoyaltyPoints(total, pricingSettings);
 
   if (!bill) return null;
 
-  const confirm = () => {
+  const confirm = async () => {
     setSubmitting(true);
-    setTimeout(() => {
+
+    try {
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/session/complete/${bill._id}`,
+        {},
+        { withCredentials: true },
+      );
+
+      const invoiceResponse = await axios.get(
+        `${import.meta.env.VITE_API_URL}/invoice/session/${bill._id}`,
+        { withCredentials: true },
+      );
+
+      const invoice = invoiceResponse.data?.invoice;
       const updatedBill = {
         ...bill,
         status: "completed",
         closed_at: new Date().toISOString(),
-        invoice_no: `INV-${Date.now()}`,
+        invoice_no: invoice?.invoiceNumber || `INV-${Date.now()}`,
+        invoiceId: invoice?._id || null,
+        invoiceData: invoice || null,
       };
 
       toast.success(`Invoice ${updatedBill.invoice_no} generated`);
       onCompleted(updatedBill);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to complete session");
+    } finally {
       setSubmitting(false);
-    }, 500);
+    }
   };
 
   return (
@@ -585,10 +669,7 @@ const CheckoutDialog = ({
           <DialogTitle>Checkout · {bill.parentName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 text-sm">
-          <Row
-            k={`Session (${bill.children?.length ?? 0} child · ${bill.totalHours ?? 0} hr)`}
-            v={formatCurrency(sessionCharge.total)}
-          />
+          <Row k="Session Total" v={formatCurrency(sessionCharge.total)} />
           {bill.children?.map((c, i) => (
             <div key={i} className="text-xs text-muted-foreground pl-3">
               ↳ {c.name} ({c.age}y):{" "}
@@ -600,39 +681,27 @@ const CheckoutDialog = ({
           <Row k="Cafe items" v={formatCurrency(foodCharge.total)} />
           <div className="h-px bg-border" />
           <div className="space-y-1.5">
-            <Label className="text-xs">Apply offer</Label>
-            <Select value={offerId} onValueChange={() => {}} disabled>
-              <SelectTrigger>
-                <SelectValue placeholder="No offer" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No offer</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
             <Label className="text-xs">Extra discount (₹)</Label>
             <Input type="text" value="--" disabled />
           </div>
           <div className="h-px bg-border" />
-          <Row
-            k="Subtotal"
-            v={formatCurrency(sessionCharge.subtotal + foodCharge.subtotal)}
-          />
-          <Row k="GST" v={formatCurrency(sessionCharge.gst + foodCharge.gst)} />
+          <div className="space-y-2">
+            <Row k="Amount Paid" v={formatCurrency(paymentSummary.amountPaid)} />
+            <Row
+              k="Pending Amount"
+              v={formatCurrency(paymentSummary.pendingAmount)}
+            />
+            <div className="text-xs text-muted-foreground">18% GST Inclusive</div>
+            <Row
+              k="Loyalty Points Earned"
+              v={loyaltyPoints.toString()}
+            />
+          </div>
           <div className="flex justify-between items-baseline pt-1">
             <span className="text-muted-foreground">Final total</span>
             <span className="text-3xl font-semibold gradient-text">
               {formatCurrency(total)}
             </span>
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Payment:{" "}
-            {bill.paymentStatus === "paid"
-              ? "Paid"
-              : bill.paymentStatus === "partially_paid"
-                ? "Partially paid"
-                : "Pending"}
           </div>
         </div>
         <DialogFooter>
@@ -670,11 +739,20 @@ const InvoiceDialog = ({ invoice, onClose }) => {
     setTimeout(() => w.print(), 250);
   };
 
-  const ch = invoice.children ?? [];
-  const start = invoice.startTime ? new Date(invoice.startTime) : null;
-  const end = invoice.closed_at ? new Date(invoice.closed_at) : null;
-  const durMin =
-    start && end ? Math.round((end.getTime() - start.getTime()) / 60000) : 0;
+  const customer = invoice?.customer || {};
+  const ch = invoice?.children ?? [];
+  const sessionDetails = invoice?.sessionDetails || {};
+  const cafeItems = invoice?.cafeItems || [];
+  const charges = invoice?.charges || {};
+  const payment = invoice?.payment || {};
+  const start = sessionDetails?.startTime ? new Date(sessionDetails.startTime) : null;
+  const end = sessionDetails?.endTime ? new Date(sessionDetails.endTime) : null;
+  const durMin = sessionDetails?.actualDurationMinutes || 0;
+  const paymentSummary = {
+    amountPaid: Number(payment?.amountPaid || 0),
+    pendingAmount: Number(payment?.pendingAmount || 0),
+  };
+  const loyaltyPoints = Number(charges?.loyaltyPoints ?? calculateLoyaltyPoints(charges?.grandTotal || 0, {}));
 
   return (
     <Dialog open={!!invoice} onOpenChange={(o) => !o && onClose()}>
@@ -705,16 +783,19 @@ const InvoiceDialog = ({ invoice, onClose }) => {
           </div>
           <div style={{ marginTop: 16, fontSize: 13 }}>
             <div>
-              <b>Parent:</b> {invoice.parentName} · {invoice.mobileNumber}
+              <b>Parent:</b> {customer.parentName || invoice.parentName} · {customer.mobileNumber || invoice.mobileNumber}
             </div>
             <div>
-              <b>Customer:</b> {invoice.sessionNumber}
+              <b>Band:</b> {customer.bandNumber || invoice.bandNumber || "—"}
             </div>
             <div>
-              <b>Paid:</b>{" "}
-              {invoice.paymentStatus === "paid"
+              <b>Session:</b> {customer.sessionNumber || invoice.sessionNumber || "—"}
+            </div>
+            <div>
+              <b>Payment:</b>{" "}
+              {payment.status === "paid"
                 ? "Paid"
-                : invoice.paymentStatus === "partially_paid"
+                : payment.status === "partially_paid"
                   ? "Partially paid"
                   : "Pending"}
             </div>
@@ -726,6 +807,9 @@ const InvoiceDialog = ({ invoice, onClose }) => {
                 <th>Child</th>
                 <th>DOB</th>
                 <th>Age</th>
+                <th>First Hour</th>
+                <th>Extension</th>
+                <th style={{ textAlign: "right" }}>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -734,6 +818,9 @@ const InvoiceDialog = ({ invoice, onClose }) => {
                   <td>{c.name}</td>
                   <td>{c.dob ? new Date(c.dob).toLocaleDateString() : "—"}</td>
                   <td>{c.age}y</td>
+                  <td>{formatCurrency(c.firstHourCharge || 0)}</td>
+                  <td>{c.extensionHours ? `${c.extensionHours}h × ${formatCurrency(c.extensionRate || 0)}` : "—"}</td>
+                  <td style={{ textAlign: "right" }}>{formatCurrency(c.childTotal || 0)}</td>
                 </tr>
               ))}
             </tbody>
@@ -743,6 +830,9 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             <div>
               <b>Session:</b> {start?.toLocaleString()} →{" "}
               {end?.toLocaleString()} ({durMin} min billed)
+            </div>
+            <div>
+              <b>Hours:</b> {sessionDetails?.totalHours || 1} total · {sessionDetails?.extensionHours || 0} extension · {sessionDetails?.pauseTimeMinutes || 0} min pause
             </div>
           </div>
 
@@ -756,19 +846,19 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             </thead>
             <tbody>
               <tr>
-                <td>Session charges ({ch.length} child) + 18% GST</td>
+                <td>Session charges ({ch.length} child)</td>
                 <td>—</td>
                 <td style={{ textAlign: "right" }}>
-                  {formatCurrency(invoice?.sessionCharge || 0)}
+                  {formatCurrency(charges?.sessionTotal || 0)}
                 </td>
               </tr>
-              <tr>
-                <td>Cafe items + 5% GST</td>
-                <td>—</td>
-                <td style={{ textAlign: "right" }}>
-                  {formatCurrency(invoice?.foodCharge || 0)}
-                </td>
-              </tr>
+              {cafeItems.map((item, index) => (
+                <tr key={`${item.name}-${index}`}>
+                  <td>{item.name}</td>
+                  <td>{item.quantity}</td>
+                  <td style={{ textAlign: "right" }}>{formatCurrency(item.lineTotal || 0)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
 
@@ -780,23 +870,32 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             }}
           >
             <div className="row">
-              <span>Subtotal</span>
-              <span>{formatCurrency(invoice?.subtotal || 0)}</span>
+              <span>Session Total</span>
+              <span>{formatCurrency(charges?.sessionTotal || 0)}</span>
             </div>
             <div className="row">
-              <span>GST</span>
-              <span>{formatCurrency(invoice?.gst || 0)}</span>
+              <span>Cafe Total</span>
+              <span>{formatCurrency(charges?.cafeTotal || 0)}</span>
+            </div>
+            <div className="row">
+              <span>Amount Paid</span>
+              <span>{formatCurrency(paymentSummary.amountPaid)}</span>
+            </div>
+            <div className="row">
+              <span>Pending Amount</span>
+              <span>{formatCurrency(paymentSummary.pendingAmount)}</span>
+            </div>
+            <div className="row" style={{ color: "#666", fontSize: 12 }}>
+              <span>18% GST Inclusive</span>
+              <span>—</span>
+            </div>
+            <div className="row">
+              <span>Loyalty Points Earned</span>
+              <span>{loyaltyPoints}</span>
             </div>
             <div className="row bold" style={{ fontSize: 18, marginTop: 6 }}>
-              <span>TOTAL</span>
-              <span>{formatCurrency(invoice?.total || 0)}</span>
-            </div>
-            <div
-              className="row"
-              style={{ marginTop: 6, color: "#666", fontSize: 12 }}
-            >
-              <span>Balance</span>
-              <span>{formatCurrency(invoice?.balanceAmount ?? 0)}</span>
+              <span>GRAND TOTAL</span>
+              <span>{formatCurrency(charges?.grandTotal || 0)}</span>
             </div>
           </div>
           <div
@@ -831,10 +930,8 @@ function SessionsPage() {
   const [checkoutBillId, setCheckoutBillId] = useState(null);
   const [finalInvoice, setFinalInvoice] = useState(null);
   const [bills, setBills] = useState([]);
-  const [offers, setOffers] = useState([]);
   const [pricingSettings, setPricingSettings] = useState(null);
   const [kotsBySession, setKotsBySession] = useState({});
-  const completingRef = useRef(new Set());
 
   useEffect(() => {
     const t = setInterval(() => force((n) => n + 1), 1000);
@@ -907,32 +1004,6 @@ function SessionsPage() {
     loadSessions();
   }, [loadSessions]);
 
-  // Auto-complete sessions whose scheduledEndTime has passed
-  useEffect(() => {
-    const runningBills = bills.filter((b) => b.status === "running");
-    const now = new Date();
-
-    runningBills.forEach(async (b) => {
-      if (!b.scheduledEndTime) return;
-      if (new Date(b.scheduledEndTime) > now) return;
-      if (completingRef.current.has(b._id)) return;
-
-      completingRef.current.add(b._id);
-      try {
-        await axios.patch(
-          `${import.meta.env.VITE_API_URL}/session/complete/${b._id}`,
-          {},
-          { withCredentials: true },
-        );
-        await loadSessions();
-      } catch (error) {
-        console.log(error);
-      } finally {
-        completingRef.current.delete(b._id);
-      }
-    });
-  }, [bills, loadSessions]);
-
   const booked = bills.filter((b) => b.status === "booked");
   const running = bills.filter(
     (b) => b.status === "running" || b.status === "paused",
@@ -971,6 +1042,28 @@ function SessionsPage() {
 
   const checkout = (b) => setCheckoutBillId(b._id);
 
+  const openInvoice = async (session) => {
+    try {
+      const invoiceResponse = await axios.get(
+        `${import.meta.env.VITE_API_URL}/invoice/session/${session._id}`,
+        { withCredentials: true },
+      );
+      const invoice = invoiceResponse.data?.invoice;
+      if (!invoice) {
+        toast.error("Invoice not found");
+        return;
+      }
+      setFinalInvoice({
+        ...session,
+        ...invoice,
+        invoice_no: invoice.invoiceNumber || session.invoice_no,
+        invoiceId: invoice._id,
+      });
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to load invoice");
+    }
+  };
+
   const startSession = async (b) => {
     try {
       await axios.patch(
@@ -1002,30 +1095,18 @@ function SessionsPage() {
   };
 
   const handleCheckoutComplete = (completedBill) => {
-    const sessionCharge = calculateSessionCharge(
-      completedBill,
-      pricingSettings,
-    );
-    const foodCharge = calculateFoodCharge({
-      ...completedBill,
-      kots: kotsBySession?.[completedBill._id] || [],
-    });
+    const invoiceData = completedBill?.invoiceData || null;
+    const charges = invoiceData?.charges || {};
 
-    const invoiceData = {
+    const finalizedInvoice = {
       ...completedBill,
-      sessionCharge: sessionCharge.total,
-      foodCharge: foodCharge.total,
-      subtotal: sessionCharge.subtotal + foodCharge.subtotal,
-      gst: sessionCharge.gst + foodCharge.gst,
-      total: sessionCharge.total + foodCharge.total,
-      balanceAmount:
-        completedBill.balanceAmount ??
-        Math.max(
-          sessionCharge.total +
-            foodCharge.total -
-            (completedBill.amountPaid || 0),
-          0,
-        ),
+      ...invoiceData,
+      sessionCharge: Number(charges.sessionTotal || 0),
+      foodCharge: Number(charges.cafeTotal || 0),
+      total: Number(charges.grandTotal || 0),
+      loyaltyPoints: Number(charges.loyaltyPoints || calculateLoyaltyPoints(charges.grandTotal || 0, pricingSettings)),
+      invoice_no: invoiceData?.invoiceNumber || completedBill.invoice_no,
+      invoiceId: invoiceData?._id || completedBill.invoiceId,
     };
 
     setBills((prevBills) => {
@@ -1033,7 +1114,7 @@ function SessionsPage() {
       return [completedBill, ...filtered];
     });
     setCheckoutBillId(null);
-    setFinalInvoice(invoiceData);
+    setFinalInvoice(finalizedInvoice);
   };
 
   return (
@@ -1144,7 +1225,7 @@ function SessionsPage() {
                 <tr
                   key={b._id}
                   className="border-t border-border hover:bg-secondary/40 cursor-pointer"
-                  onClick={() => setFinalInvoice(b)}
+                  onClick={() => openInvoice(b)}
                 >
                   <td className="px-4 py-2.5 font-mono text-xs text-primary">
                     {b.invoice_no}
@@ -1159,7 +1240,7 @@ function SessionsPage() {
                   <td className="px-4 py-2.5 text-muted-foreground">
                     {b.closed_at ? new Date(b.closed_at).toLocaleString() : "—"}
                   </td>
-                  <td className="px-4 py-2.5 text-right font-semibold">--</td>
+                  <td className="px-4 py-2.5 text-right font-semibold">{formatCurrency(b?.invoiceData?.charges?.grandTotal || b?.charges?.grandTotal || 0)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1171,7 +1252,6 @@ function SessionsPage() {
         <CheckoutDialog
           billId={checkoutBillId}
           bills={bills}
-          offers={offers}
           pricingSettings={pricingSettings}
           kotsBySession={kotsBySession}
           onClose={() => setCheckoutBillId(null)}

@@ -771,7 +771,7 @@ function BillingPage() {
                 {paymentBreakdown
                   .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
                   .toLocaleString()}{" "}
-                · Balance: ₹
+                · Pending: ₹
                 {Math.max(
                   estimatedCharge.total -
                     paymentBreakdown.reduce(
