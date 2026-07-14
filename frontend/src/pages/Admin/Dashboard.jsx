@@ -35,120 +35,34 @@ const CHART_COLORS = [
   "#06b6d4",
 ];
 
-function startOf(period) {
-  const d = new Date();
-  if (period === "day") d.setHours(0, 0, 0, 0);
-  if (period === "week") d.setDate(d.getDate() - 7);
-  if (period === "month") d.setDate(d.getDate() - 30);
-  return d.toISOString();
-}
-
-function isoDaysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
-function makeMockStats() {
-  const customers = [
-    {
-      id: 1,
-      child_name: "Asha",
-      parent_name: "Rita",
-      customer_code: "C001",
-      visit_count: 5,
-      total_spent: 1200,
-      reward_points: 30,
-      created_at: isoDaysAgo(10),
-    },
-    {
-      id: 2,
-      child_name: "Rahul",
-      parent_name: "Sunil",
-      customer_code: "C002",
-      visit_count: 2,
-      total_spent: 300,
-      reward_points: 10,
-      created_at: isoDaysAgo(6),
-    },
-    {
-      id: 3,
-      child_name: "Mia",
-      parent_name: "Kiran",
-      customer_code: "C003",
-      visit_count: 1,
-      total_spent: 150,
-      reward_points: 5,
-      created_at: isoDaysAgo(2),
-    },
-  ];
-
-  const offers = [
-    { id: 1, name: "Welcome" },
-    { id: 2, name: "Summer" },
-  ];
-
-  const bills = [
-    {
-      id: 11,
-      total: 200,
-      created_at: isoDaysAgo(0),
-      offer_id: 1,
-      customer_id: 1,
-    },
-    {
-      id: 12,
-      total: 150,
-      created_at: isoDaysAgo(1),
-      offer_id: 2,
-      customer_id: 2,
-    },
-    { id: 13, total: 300, created_at: isoDaysAgo(3), customer_id: 1 },
-    { id: 14, total: 120, created_at: isoDaysAgo(8), customer_id: 3 },
-  ];
-
-  const cafe = [
-    { item_name: "Latte", quantity: 2, total: 200, created_at: isoDaysAgo(0) },
-    { item_name: "Cookie", quantity: 3, total: 150, created_at: isoDaysAgo(2) },
-    {
-      item_name: "Hot Chocolate",
-      quantity: 1,
-      total: 120,
-      created_at: isoDaysAgo(5),
-    },
-  ];
-
-  const sessions = [
-    {
-      id: 1,
-      status: "active",
-      end_time: new Date(Date.now() + 20 * 60000).toISOString(),
-      customer_id: 1,
-      duration_minutes: 30,
-      customer: { child_name: "Asha", customer_code: "C001" },
-    },
-  ];
-
-  return { bills, customers, cafe, offers, sessions };
-}
-
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [membershipAnalytics, setMembershipAnalytics] = useState(null);
 
   useEffect(() => {
-    // load mock data and auto-refresh every 30s
-    function load() {
-      setIsLoading(true);
-      const s = makeMockStats();
-      setStats(s);
-      setIsLoading(false);
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const response = await axios.get(
+          `${import.meta.env.VITE_API_URL}/admin/dashboard`,
+          { withCredentials: true },
+        );
+        if (!cancelled) setStats(response.data);
+      } catch (error) {
+        console.warn("Unable to load dashboard stats", error);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
     }
+
     load();
     const id = setInterval(load, 30_000);
-    return () => clearInterval(id);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   useEffect(() => {
@@ -174,83 +88,40 @@ export default function Dashboard() {
   if (isLoading || !stats)
     return <div className="text-muted-foreground">Loading dashboard…</div>;
 
-  const today = startOf("day"),
-    week = startOf("week"),
-    month = startOf("month");
-  const totalRevenue = stats.bills.reduce(
-    (s, b) => s + Number(b.total || 0),
-    0,
-  );
-  const todaySales = stats.bills
-    .filter((b) => b.created_at >= today)
-    .reduce((s, b) => s + Number(b.total), 0);
-  const weekSales = stats.bills
-    .filter((b) => b.created_at >= week)
-    .reduce((s, b) => s + Number(b.total), 0);
-  const monthSales = stats.bills
-    .filter((b) => b.created_at >= month)
-    .reduce((s, b) => s + Number(b.total), 0);
-  const cafeRevenue = stats.cafe.reduce((s, c) => s + Number(c.total || 0), 0);
-  const cafeWeek = stats.cafe
-    .filter((c) => c.created_at >= week)
-    .reduce((s, c) => s + Number(c.total || 0), 0);
-  const dailyCustomers = new Set(
-    stats.bills.filter((b) => b.created_at >= today).map((b) => b.customer_id),
-  ).size;
-  const newCustomers = stats.customers.filter(
-    (c) => c.created_at >= week,
-  ).length;
-  const repeat = stats.customers.filter((c) => (c.visit_count ?? 0) > 1).length;
+  const totalRevenue = Number(stats.totals?.totalRevenue || 0);
+  const todaySales = Number(stats.today?.sales || 0);
+  const dailyCustomers = Number(stats.today?.customers || 0);
+  const weekSales = Number(stats.week?.sales || 0);
+  const monthSales = Number(stats.month?.sales || 0);
+  const cafeRevenue = Number(stats.totals?.cafeRevenue || 0);
+  const cafeWeek = Number(stats.week?.cafeSales || 0);
+  const totalOrders = Number(stats.totals?.totalOrders || 0);
+  const repeat = Number(stats.repeatCustomers || 0);
+  const newCustomers = Number(stats.newCustomersThisWeek || 0);
 
-
-  const activeSessions = stats.sessions.filter(
-    (s) => s.status === "active" && new Date(s.end_time).getTime() > now,
-  );
+  const activeSessions = stats.activeSessions || [];
   const expiringSessions = activeSessions.filter(
-    (s) => new Date(s.end_time).getTime() - now < 10 * 60_000,
+    (s) => new Date(s.scheduledEndTime).getTime() - now < 10 * 60_000,
   );
 
-  const topCustomers = [...stats.customers]
-    .sort((a, b) => Number(b.total_spent ?? 0) - Number(a.total_spent ?? 0))
-    .slice(0, 5);
+  const topCustomers = stats.topCustomers || [];
 
-  const daily = {};
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    d.setHours(0, 0, 0, 0);
-    daily[d.toISOString().slice(0, 10)] = 0;
-  }
-  stats.bills.forEach((b) => {
-    const k = new Date(b.created_at).toISOString().slice(0, 10);
-    if (k in daily) daily[k] += Number(b.total);
-  });
-  const lineData = Object.entries(daily).map(([d, v]) => ({
-    date: d.slice(5),
-    revenue: v,
+  const lineData = (stats.revenueTrend || []).map((r) => ({
+    date: r.date.slice(5),
+    revenue: r.revenue,
   }));
 
-  const offerMap = Object.fromEntries(stats.offers.map((o) => [o.id, o.name]));
-  const offerCounts = {};
-  stats.bills.forEach((b) => {
-    if (b.offer_id) {
-      const n = offerMap[b.offer_id] ?? "Other";
-      offerCounts[n] = (offerCounts[n] ?? 0) + 1;
-    }
-  });
-  const offerData = Object.entries(offerCounts).map(([name, value]) => ({
-    name,
-    value,
+  const offerData = (stats.offerUsage || []).map((o) => ({
+    name: o._id,
+    value: o.value,
   }));
 
-  const cafeMap = {};
-  stats.cafe.forEach((c) => {
-    cafeMap[c.item_name] = (cafeMap[c.item_name] ?? 0) + Number(c.quantity);
-  });
-  const cafeData = Object.entries(cafeMap)
-    .map(([name, qty]) => ({ name, qty }))
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 6);
+  const cafeData = (stats.bestSellingCafeItems || []).map((c) => ({
+    name: c._id,
+    qty: c.qty,
+  }));
+
+  const recentTransactions = stats.recentTransactions || [];
 
   return (
     <div className="space-y-8 px-6 py-8">
@@ -327,7 +198,7 @@ export default function Dashboard() {
         />
         <StatCard
           label="Total Orders"
-          value={stats.bills.length}
+          value={totalOrders}
           icon={Receipt}
           accent="oklch(0.78 0.17 75)"
         />
@@ -348,14 +219,14 @@ export default function Dashboard() {
             {activeSessions.slice(0, 8).map((s) => {
               const remaining = Math.max(
                 0,
-                new Date(s.end_time).getTime() - now,
+                new Date(s.scheduledEndTime).getTime() - now,
               );
               const m = Math.floor(remaining / 60_000),
                 sec = Math.floor((remaining % 60_000) / 1000);
               const exp = remaining < 10 * 60_000;
               return (
                 <div
-                  key={s.id}
+                  key={String(s._id)}
                   className={[
                     "rounded-xl border p-3",
                     exp
@@ -364,10 +235,10 @@ export default function Dashboard() {
                   ].join(" ")}
                 >
                   <div className="text-xs text-muted-foreground">
-                    {s.customer?.customer_code}
+                    {s.bandNumber || s.sessionNumber}
                   </div>
                   <div className="font-semibold text-sm truncate">
-                    {s.customer?.child_name}
+                    {s.parentName}
                   </div>
                   <div className="mt-1 flex items-center gap-1 font-mono text-lg tabular-nums">
                     {exp && (
@@ -503,7 +374,7 @@ export default function Dashboard() {
             )}
             {topCustomers.map((c, i) => (
               <div
-                key={c.id}
+                key={c._id}
                 className="flex items-center justify-between p-2 rounded-xl hover:bg-muted/60"
               >
                 <div className="flex items-center gap-3 min-w-0">
@@ -519,7 +390,7 @@ export default function Dashboard() {
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-medium truncate">
-                      {c.child_name}
+                      {c.parentName}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {c.visit_count ?? 0} visits · {c.reward_points ?? 0} pts
@@ -535,27 +406,24 @@ export default function Dashboard() {
 
           <h3 className="font-semibold mt-6 mb-4">Recent transactions</h3>
           <div className="space-y-1 max-h-48 overflow-auto">
-            {stats.bills.slice(0, 6).map((b) => {
-              const cust = stats.customers.find((c) => c.id === b.customer_id);
-              return (
-                <div
-                  key={b.id}
-                  className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/60"
-                >
-                  <div>
-                    <div className="text-sm font-medium">
-                      {cust?.child_name ?? "—"}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {cust?.customer_code}
-                    </div>
+            {recentTransactions.map((b) => (
+              <div
+                key={b.invoiceNumber || String(b._id)}
+                className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/60"
+              >
+                <div>
+                  <div className="text-sm font-medium">
+                    {b.customer?.parentName ?? "—"}
                   </div>
-                  <div className="text-sm font-semibold">
-                    ₹{Number(b.total).toLocaleString()}
+                  <div className="text-xs text-muted-foreground">
+                    {b.customer?.bandNumber || b.customer?.sessionNumber}
                   </div>
                 </div>
-              );
-            })}
+                <div className="text-sm font-semibold">
+                  ₹{Number(b.charges?.grandTotal ?? 0).toLocaleString()}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

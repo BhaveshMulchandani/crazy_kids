@@ -211,6 +211,8 @@ const sessionSchema = new mongoose.Schema(
   }
 );
 
+sessionSchema.index({ status: 1, scheduledEndTime: 1 });
+
 module.exports = mongoose.model(
   "session",
   sessionSchema

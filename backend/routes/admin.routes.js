@@ -4,5 +4,6 @@ const {isloggedin, isadmin} = require('../middlewares/user.middleware');
 const admincontroller = require('../controllers/admin.controller');
 
 router.get('/customers', isloggedin, isadmin, admincontroller.fetchcustomers);
+router.get('/dashboard', isloggedin, isadmin, admincontroller.dashboardStats);
 
 module.exports = router;

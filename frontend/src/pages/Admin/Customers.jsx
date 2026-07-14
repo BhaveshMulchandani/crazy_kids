@@ -46,16 +46,23 @@ function CustomersPage() {
   }, []);
 
   const filtered = React.useMemo(() => {
-    const query = q.trim().toLowerCase();
-    if (!query) return customers;
-    return customers.filter(
-      (customer) =>
-        customer.child_name.toLowerCase().includes(query) ||
-        customer.parent_name.toLowerCase().includes(query) ||
-        customer.mobile.includes(query) ||
-        customer.customer_code.toLowerCase().includes(query),
+  const query = q.trim().toLowerCase();
+
+  if (!query) return customers;
+
+  return customers.filter((customer) => {
+    const childNames = customer.children
+      ?.map((child) => child.name.toLowerCase())
+      .join(" ") || "";
+
+    return (
+      childNames.includes(query) ||
+      customer.parentName?.toLowerCase().includes(query) ||
+      customer.mobileNumber?.includes(query) ||
+      customer.sessionNumber?.toLowerCase().includes(query)
     );
-  }, [q]);
+  });
+}, [q, customers]);
 
   return (
     <div className="space-y-6 px-6 py-8">

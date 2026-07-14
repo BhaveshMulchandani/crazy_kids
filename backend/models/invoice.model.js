@@ -103,4 +103,7 @@ const invoiceSchema = new mongoose.Schema(
   }
 );
 
+invoiceSchema.index({ createdAt: -1 });
+invoiceSchema.index({ "customer.mobileNumber": 1 });
+
 module.exports = mongoose.model("Invoice", invoiceSchema);
