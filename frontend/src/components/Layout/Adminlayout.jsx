@@ -1,5 +1,5 @@
 import { Outlet } from "react-router-dom";
-import Topnav from "../Navbar/admin/Admintopnav";
+// import Topnav from "../Navbar/admin/Admintopnav";
 import Sidenav from "../Navbar/admin/Adminsidenav";
 
 const Layout = () => {
@@ -11,7 +11,7 @@ const Layout = () => {
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col">
         {/* topbar */}
-        <Topnav />
+        {/* <Topnav /> */}
 
         {/* Main Content */}
         <div className="flex-1 overflow-y-auto bg-gray-50">

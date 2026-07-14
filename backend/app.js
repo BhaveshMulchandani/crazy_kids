@@ -9,6 +9,7 @@ const sessionroutes = require('./routes/session.routes')
 const caferoutes = require('./routes/cafe.routes')
 const invoiceroutes = require('./routes/invoice.routes')
 const membershiproutes = require('./routes/membership.routes')
+const adminroutes = require('./routes/admin.routes')
 const cors = require('cors');
 const cookieParser = require("cookie-parser");
 
@@ -22,8 +23,6 @@ app.use(cookieParser())
 
 connectDB();
 
-
-
 app.use(express.json());
 app.use('/users', userroutes);
 app.use('/menu', menuroutes)
@@ -33,9 +32,7 @@ app.use('/session', sessionroutes)
 app.use('/cafe', caferoutes)
 app.use('/invoice', invoiceroutes)
 app.use('/memberships', membershiproutes)
-
-
-
+app.use('/admin', adminroutes)
 
 app.listen(3000, () => {
   console.log("server is running on port 3000")
