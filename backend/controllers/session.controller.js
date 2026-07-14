@@ -39,6 +39,11 @@ const isBirthdayToday = (dob) => {
 const Invoice = require('../models/invoice.model');
 const KOT = require('../models/cafe.model');
 const PriceSetting = require('../models/price.model');
+const Membership = require('../models/membership.model');
+const { createMembership, refreshStatus } = require('./membership.controller');
+const { calculateInvoiceCharges } = require('../services/billing.service');
+
+const membershipChildKey = (child) => `${String(child.name || "").trim().toLowerCase()}|${new Date(child.dob).toISOString().slice(0, 10)}`;
 
 const createsession = async (
   req,
@@ -58,6 +63,7 @@ const createsession = async (
       paymentMethod,
       paymentBreakdown,
       amountPaid,
+      purchaseMembershipPlan,
     } = req.body;
 
     // Validations
@@ -115,6 +121,27 @@ const createsession = async (
       count
     ).padStart(5, "0")}`;
 
+    let purchasedMembership = null;
+    if (purchaseMembershipPlan) {
+      purchasedMembership = await createMembership({ parentName, mobileNumber, planId: purchaseMembershipPlan });
+    }
+    const activeMembership = purchasedMembership || await Membership.findOne({ "customer.mobileNumber": mobileNumber.trim(), status: "active", expiryDate: { $gt: new Date() }, remainingPlayHours: { $gt: 0 } }).sort({ expiryDate: 1 });
+    if (activeMembership) {
+      refreshStatus(activeMembership);
+      await activeMembership.save();
+    }
+    if (activeMembership?.status === "active") {
+      const registeredChildren = activeMembership.registeredChildren || [];
+      const registeredKeys = new Set(registeredChildren.map(membershipChildKey));
+      const newChildren = processedChildren.filter((child) => !registeredKeys.has(membershipChildKey(child)));
+      if (registeredChildren.length + newChildren.length > activeMembership.kidsAllowed) {
+        return res.status(400).json({ message: "Membership child limit reached. This membership already has the maximum allowed children." });
+      }
+      if (newChildren.length) {
+        activeMembership.registeredChildren.push(...newChildren.map((child) => ({ name: child.name, dob: child.dob })));
+        await activeMembership.save();
+      }
+    }
     const session =
       await sessionmodel.create({
         sessionNumber,
@@ -132,7 +159,9 @@ const createsession = async (
           processedChildren,
 
         offer:
-          offer || null,
+          purchaseMembershipPlan ? null : offer || null,
+        membership: activeMembership?.status === "active" ? activeMembership._id : null,
+        membershipPurchase: purchasedMembership ? { membership: purchasedMembership._id, planName: purchasedMembership.planName, price: purchasedMembership.purchasePrice } : undefined,
 
         reference:
           reference?.trim() || "",
@@ -186,6 +215,7 @@ const bookedsession = async (req, res) => {
     const sessions = await sessionmodel
       .find({ status: "booked" })
       .populate("offer")
+      .populate("membership")
       .sort({ createdAt: -1 });
 
     const updatedSessions = sessions.map((session) => {
@@ -426,87 +456,28 @@ const completesession = async (req, res) => {
     if (!existingInvoice) {
       const settings = await PriceSetting.findOne();
       const kots = await KOT.find({ session: id }).sort({ createdAt: -1 });
-
-      const children = Array.isArray(session.children) ? session.children : [];
-      const totalHours = Number(session.totalHours || 1);
-      const extensionHours = Math.max(totalHours - 1, 0);
-      const pauseTimeMinutes = Number(session.totalPausedMinutes || 0);
+      const calculation = await calculateInvoiceCharges({ session, settings, kots });
+      let hoursBeforeSession = 0;
+      if (calculation.membershipApplied) {
+        hoursBeforeSession = Number(calculation.membership.remainingPlayHours);
+        calculation.membership.usedPlayHours += calculation.totalHours;
+        calculation.membership.remainingPlayHours -= calculation.totalHours;
+        refreshStatus(calculation.membership);
+        await calculation.membership.save();
+      }
       const startTime = session.startTime ? new Date(session.startTime) : null;
-      const endTime = session.actualEndTime ? new Date(session.actualEndTime) : null;
-      const actualDurationMinutes = startTime && endTime
-        ? Math.max(0, Math.round((endTime.getTime() - startTime.getTime()) / 60000))
-        : 0;
-
-      const childCharges = children.map((child) => {
-        const age = Number(child?.age ?? 0);
-        const isUnder3 = age < 3;
-        const firstHourRate = isUnder3
-          ? Number(settings?.firstHourUnder3 ?? 0)
-          : Number(settings?.firstHourAbove3 ?? 0);
-        const extensionRate = isUnder3
-          ? Number(settings?.extensionUnder3 ?? 0)
-          : Number(settings?.extensionAbove3 ?? 0);
-        const childTotal = firstHourRate + Math.max(totalHours - 1, 0) * extensionRate;
-
-        return {
-          name: child?.name || "",
-          dob: child?.dob || null,
-          age,
-          firstHourCharge: firstHourRate,
-          extensionHours,
-          extensionRate,
-          childTotal,
-        };
-      });
-
-      const cafeItems = (kots || []).flatMap((kot) => (kot?.items || []).map((item) => ({
-        name: item?.name || "",
-        quantity: Number(item?.quantity || 1),
-        unitPrice: Number(item?.price || 0),
-        lineTotal: Number(item?.total || 0),
-      })));
-      const sessionTotal = childCharges.reduce((sum, child) => sum + Number(child.childTotal || 0), 0);
-      const cafeTotal = cafeItems.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0);
-      const grandTotal = sessionTotal + cafeTotal;
+      const actualDurationMinutes = startTime ? Math.max(0, Math.round((session.actualEndTime - startTime) / 60000)) : 0;
       const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
-      const loyaltyPoints = Math.floor(Number(grandTotal || 0) / 100) * pointsPer100;
-
-      await Invoice.create({
-        invoiceNumber: `INV-${Date.now()}`,
-        session: session._id,
-        customer: {
-          parentName: session.parentName || "",
-          mobileNumber: session.mobileNumber || "",
-          bandNumber: session.bandNumber || "",
-          sessionNumber: session.sessionNumber || "",
-        },
-        children: childCharges,
-        sessionDetails: {
-          startTime: session.startTime || null,
-          endTime: session.actualEndTime || null,
-          actualDurationMinutes,
-          totalHours,
-          extensionHours,
-          pauseTimeMinutes,
-        },
-        cafeItems,
-        charges: {
-          sessionTotal,
-          cafeTotal,
-          grandTotal,
-          loyaltyPoints,
-        },
-        payment: {
-          status: session.paymentStatus || "pending",
-          breakdown: Array.isArray(session.paymentBreakdown)
-            ? session.paymentBreakdown.map((entry) => ({
-              method: entry?.method || "cash",
-              amount: Number(entry?.amount || 0),
-            }))
-            : [],
-          amountPaid: Number(session.amountPaid || 0),
-          pendingAmount: Math.max(grandTotal - Number(session.amountPaid || 0), 0),
-        },
+      const loyaltyPoints = Math.floor(calculation.grandTotal / 100) * pointsPer100;
+      await Invoice.create({ invoiceNumber: `INV-${Date.now()}`, session: session._id,
+        customer: { parentName: session.parentName, mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber },
+        children: calculation.childCharges,
+        sessionDetails: { startTime: session.startTime, endTime: session.actualEndTime, actualDurationMinutes, totalHours: calculation.totalHours, extensionHours: calculation.extensionHours, pauseTimeMinutes: session.totalPausedMinutes || 0 },
+        cafeItems: calculation.cafeItems,
+        charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0) },
+        offer: { name: calculation.offer?.name || "", type: calculation.offer?.type || "", discountAmount: calculation.discountAmount, specialPricingApplied: calculation.specialPricingApplied },
+        membership: { applied: calculation.membershipApplied, membership: calculation.membership?._id || null, planName: calculation.membership?.planName || "", hoursConsumed: calculation.membershipApplied ? calculation.totalHours : 0, hoursBeforeSession: calculation.membershipApplied ? hoursBeforeSession : 0, remainingHours: calculation.membershipApplied ? calculation.membership.remainingPlayHours : 0, expiryDate: calculation.membershipApplied ? calculation.membership.expiryDate : null, purchase: { planName: calculation.membershipPurchase?.planName || "", price: Number(calculation.membershipPurchase?.price || 0) } },
+        payment: { status: session.paymentStatus || "pending", breakdown: session.paymentBreakdown || [], amountPaid: Number(session.amountPaid || 0), pendingAmount: Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0) },
       });
     }
 
@@ -530,6 +501,7 @@ const runningsession = async (req, res) => {
         },
       })
       .populate("offer")
+      .populate("membership")
       .sort({ startTime: -1 });
 
     const updatedSessions = sessions.map((session) => {
@@ -588,7 +560,8 @@ const searchBillingCustomer = async (req, res) => {
       });
     }
 
-    const customers = await sessionmodel
+    const escapedQuery = q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matches = await sessionmodel
       .find({
         status: {
           $in: ["completed"],
@@ -596,7 +569,7 @@ const searchBillingCustomer = async (req, res) => {
         $or: [
           {
             parentName: {
-              $regex: `^${q.trim()}$`,
+              $regex: `^${escapedQuery}$`,
               $options: "i",
             },
           },
@@ -605,14 +578,36 @@ const searchBillingCustomer = async (req, res) => {
           }
         ],
       })
-      .select(
-        "_id sessionNumber parentName mobileNumber bandNumber children reference notes"
-      )
+      .select("_id sessionNumber parentName mobileNumber bandNumber children reference notes createdAt")
       .sort({ createdAt: -1 });
 
+    const mobileNumbers = [...new Set(matches.map((session) => session.mobileNumber))];
+    const completedSessions = mobileNumbers.length
+      ? await sessionmodel.find({ status: "completed", mobileNumber: { $in: mobileNumbers } }).select("_id mobileNumber").lean()
+      : [];
+    const invoices = completedSessions.length
+      ? await Invoice.find({ session: { $in: completedSessions.map((session) => session._id) } }).select("session charges.grandTotal charges.loyaltyPoints").lean()
+      : [];
+    const sessionMobileById = new Map(completedSessions.map((session) => [String(session._id), session.mobileNumber]));
+    const totalsByMobile = new Map(mobileNumbers.map((mobileNumber) => [mobileNumber, { visit_count: 0, total_spent: 0, reward_points: 0 }]));
+    completedSessions.forEach((session) => { totalsByMobile.get(session.mobileNumber).visit_count += 1; });
+    invoices.forEach((invoice) => {
+      const totals = totalsByMobile.get(sessionMobileById.get(String(invoice.session)));
+      if (totals) {
+        totals.total_spent += Number(invoice.charges?.grandTotal || 0);
+        totals.reward_points += Number(invoice.charges?.loyaltyPoints || 0);
+      }
+    });
+    const customers = matches.reduce((uniqueCustomers, session) => {
+      if (!uniqueCustomers.has(session.mobileNumber)) {
+        uniqueCustomers.set(session.mobileNumber, { ...session.toObject(), ...(totalsByMobile.get(session.mobileNumber) || {}) });
+      }
+      return uniqueCustomers;
+    }, new Map());
+
     return res.status(200).json({
-      count: customers.length,
-      customers,
+      count: customers.size,
+      customers: [...customers.values()],
     });
   } catch (error) {
     return res.status(500).json({

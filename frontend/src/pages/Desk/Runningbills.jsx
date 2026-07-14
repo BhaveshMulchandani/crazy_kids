@@ -27,7 +27,12 @@ const elapsedSeconds = (bill) => {
   if (!bill.startTime) return 0;
   const start = new Date(bill.startTime);
   const now = new Date();
-  const diff = now.getTime() - start.getTime();
+  const pausedMilliseconds = (bill.pauseHistory || []).reduce((total, pause) => {
+    if (!pause?.pausedAt) return total;
+    const pauseEnd = pause.resumedAt ? new Date(pause.resumedAt) : now;
+    return total + Math.max(0, pauseEnd.getTime() - new Date(pause.pausedAt).getTime());
+  }, 0);
+  const diff = now.getTime() - start.getTime() - pausedMilliseconds;
   return Math.max(0, Math.floor(diff / 1000));
 };
 
@@ -54,6 +59,9 @@ const isBirthdayChild = (child) => {
 };
 
 const calculateSessionCharge = (bill, pricingSettings) => {
+  if (bill?.membership && Number(bill.membership.remainingPlayHours || 0) >= Number(bill.totalHours || 1) && Number(bill.membership.kidsAllowed || 0) >= (bill.children?.length || 0)) {
+    return { subtotal: 0, total: 0, membershipApplied: true };
+  }
   const children = bill?.children ?? [];
   const subtotal = children.reduce((total, child) => {
     const age = child?.age ?? 0;
@@ -74,6 +82,7 @@ const calculateSessionCharge = (bill, pricingSettings) => {
   return {
     subtotal,
     total: subtotal,
+    membershipApplied: false,
   };
 };
 
@@ -108,9 +117,11 @@ const calculateFoodCharge = (bill) => {
     (sum, kot) => sum + Number(kot?.totalAmount || 0),
     0,
   );
+  const gst = Math.round(subtotal * 0.05 * 100) / 100;
   return {
     subtotal,
-    total: subtotal,
+    gst,
+    total: subtotal + gst,
   };
 };
 
@@ -845,6 +856,8 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               </tr>
             </thead>
             <tbody>
+              {invoice.membership?.applied && <tr><td>Membership applied · {invoice.membership.planName}</td><td>—</td><td style={{ textAlign: "right" }}>Session covered</td></tr>}
+              {invoice.membership?.purchase?.price > 0 && <tr><td>Membership purchase · {invoice.membership.purchase.planName}</td><td>1</td><td style={{ textAlign: "right" }}>{formatCurrency(invoice.membership.purchase.price)}</td></tr>}
               <tr>
                 <td>Session charges ({ch.length} child)</td>
                 <td>—</td>
@@ -872,6 +885,24 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             <div className="row">
               <span>Session Total</span>
               <span>{formatCurrency(charges?.sessionTotal || 0)}</span>
+            </div>
+            {invoice.membership?.applied && <div className="row"><span>Membership Applied ({invoice.membership.hoursConsumed}h)</span><span>Session charge ₹0</span></div>}
+            {invoice.membership?.applied && <>
+              <div className="row"><span>Membership Name</span><span>{invoice.membership.planName}</span></div>
+              <div className="row"><span>Membership Hours Before Session</span><span>{invoice.membership.hoursBeforeSession}h</span></div>
+              <div className="row"><span>Hours Used In This Session</span><span>{invoice.membership.hoursConsumed}h</span></div>
+              <div className="row"><span>Remaining Membership Hours</span><span>{invoice.membership.remainingHours}h</span></div>
+              <div className="row"><span>Membership Expiry Date</span><span>{invoice.membership.expiryDate ? new Date(invoice.membership.expiryDate).toLocaleDateString() : "—"}</span></div>
+            </>}
+            {charges?.discountAmount > 0 && <div className="row"><span>Offer Discount</span><span>-{formatCurrency(charges.discountAmount)}</span></div>}
+            {charges?.membershipPurchaseTotal > 0 && <div className="row"><span>Membership Purchase</span><span>{formatCurrency(charges.membershipPurchaseTotal)}</span></div>}
+            <div className="row">
+              <span>Cafe Subtotal</span>
+              <span>{formatCurrency(charges?.cafeSubtotal ?? charges?.cafeTotal ?? 0)}</span>
+            </div>
+            <div className="row">
+              <span>Cafe GST (5%)</span>
+              <span>{formatCurrency(charges?.cafeGST || 0)}</span>
             </div>
             <div className="row">
               <span>Cafe Total</span>

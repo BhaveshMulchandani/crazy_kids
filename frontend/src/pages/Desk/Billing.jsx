@@ -163,6 +163,8 @@ function BillingPage() {
   const [notes, setNotes] = useState("");
   const [bandNumber, setBandNumber] = useState("");
   const [offerId, setOfferId] = useState("none");
+  const [membershipPlanId, setMembershipPlanId] = useState("none");
+  const [membership, setMembership] = useState(null);
   const [offers, setOffers] = useState([]);
   const [reference, setReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -262,6 +264,9 @@ function BillingPage() {
     setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "" }]);
     setSearchResults([]);
     setErrors((prev) => ({ ...prev, parentName: "", mobile: "" }));
+    axios.get(`${API_BASE}/memberships/active/${encodeURIComponent(selectedCustomer.mobileNumber || "")}`, { withCredentials: true })
+      .then((response) => setMembership(response.data?.membership || null))
+      .catch(() => setMembership(null));
   };
 
   const findCustomer = async () => {
@@ -281,18 +286,11 @@ function BillingPage() {
       setSearchResults(customers);
 
       if (customers.length === 0) {
-        setCustomer(null);
         toast.info("No matching customer found");
         return;
       }
 
-      if (customers.length === 1) {
-        applyCustomer(customers[0]);
-        toast.success("Customer loaded");
-        return;
-      }
-
-      toast.info(`Found ${customers.length} matching customers`);
+      toast.info(`Found ${customers.length} matching customer${customers.length === 1 ? "" : "s"}. Select one to apply.`);
     } catch (error) {
       toast.error(error.response?.data?.message || "Unable to search customer");
     }
@@ -323,6 +321,21 @@ function BillingPage() {
           nextErrors[`child-${index}-dob`] = "Child DOB is required";
         }
       });
+    }
+
+    const selectedMembershipPlan = membershipPlanId === "none"
+      ? null
+      : offers.find((offer) => offer.id === membershipPlanId);
+    const membershipForValidation = membership || selectedMembershipPlan;
+    if (membershipForValidation && validChildren.length) {
+      const childKey = (child) => `${child.name.trim().toLowerCase()}|${new Date(child.dob).toISOString().slice(0, 10)}`;
+      const registeredChildren = membership?.registeredChildren || [];
+      const registeredKeys = new Set(registeredChildren.map(childKey));
+      const newChildren = new Set(validChildren.map(childKey).filter((key) => !registeredKeys.has(key)));
+      const kidsAllowed = Number(membershipForValidation.kidsAllowed ?? membershipForValidation.rules?.kidsAllowed ?? 0);
+      if (registeredChildren.length + newChildren.size > kidsAllowed) {
+        nextErrors.children = "Membership child limit reached.";
+      }
     }
 
     if (paymentStatus === "paid") {
@@ -386,6 +399,7 @@ function BillingPage() {
         children: validChildrenPayload,
 
         offer: offerId === "none" ? null : offerId,
+        purchaseMembershipPlan: membershipPlanId === "none" ? null : membershipPlanId,
 
         reference,
 
@@ -432,6 +446,8 @@ function BillingPage() {
     setChildren([{ name: "", dob: "" }]);
     setBandNumber("");
     setOfferId("none");
+    setMembershipPlanId("none");
+    setMembership(null);
     setReference("");
     setSocks(false);
     setNotes("");
@@ -483,7 +499,7 @@ function BillingPage() {
                     <span>
                       {result.parentName} · {result.mobileNumber}
                     </span>
-                    <span className="text-xs text-muted-foreground">{result.sessionNumber}</span>
+                    <span className="text-xs text-primary">Apply</span>
                   </button>
                 ))}
               </div>
@@ -510,6 +526,17 @@ function BillingPage() {
             · {customer.visit_count ?? 0} visits · ₹
             {Number(customer.total_spent ?? 0).toLocaleString()} spent ·{" "}
             {customer.reward_points ?? 0} pts
+          </div>
+        )}
+        {membership && (
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-slate-700">
+            <div className="font-semibold text-blue-900">Active membership · {membership.planName}</div>
+            <div className="mt-1 grid gap-1 sm:grid-cols-3">
+              <span>Remaining: {membership.remainingPlayHours}h of {membership.totalPlayHours}h</span>
+              <span>Used: {membership.usedPlayHours}h</span>
+              <span>Valid until: {new Date(membership.expiryDate).toLocaleDateString()}</span>
+            </div>
+            <div className="mt-1">Kids allowed: {membership.kidsAllowed}{membership.benefits?.length ? ` · ${membership.benefits.join(", ")}` : ""}</div>
           </div>
         )}
       </div>
@@ -645,10 +672,10 @@ function BillingPage() {
               >
                 <option value="none">No offer</option>
                 {offers.length > 0 &&
-                  offers.map((offer) => (
+                  offers.filter((offer) => offer.type !== "membership").map((offer) => (
                     <option key={offer.id} value={offer.id}>
                       {offer.name} ·{" "}
-                      {offer.type === "percent"
+                      {offer.type === "discount"
                         ? `${offer.value}%`
                         : `₹${offer.value}`}
                     </option>
@@ -656,13 +683,17 @@ function BillingPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label>Reference</Label>
-              <Input
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                placeholder="Booking reference"
-              />
+              <Label>Purchase membership (optional)</Label>
+              <select className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm" value={membershipPlanId} disabled={!!membership} onChange={(e) => setMembershipPlanId(e.target.value)}>
+                <option value="none">{membership ? "Customer already has an active membership" : "No membership"}</option>
+                {offers.filter((offer) => offer.type === "membership").map((offer) => <option key={offer.id} value={offer.id}>{offer.name} · ₹{offer.value}</option>)}
+              </select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Reference</Label>
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Booking reference" />
           </div>
 
           <div className="grid grid-cols-2 gap-5">

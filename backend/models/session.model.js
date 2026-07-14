@@ -80,6 +80,18 @@ const sessionSchema = new mongoose.Schema(
       default: null,
     },
 
+    membership: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Membership",
+      default: null,
+    },
+
+    membershipPurchase: {
+      membership: { type: mongoose.Schema.Types.ObjectId, ref: "Membership" },
+      planName: { type: String, default: "" },
+      price: { type: Number, default: 0 },
+    },
+
     reference: {
       type: String,
       default: "",

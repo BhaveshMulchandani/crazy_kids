@@ -1,0 +1,49 @@
+const Offer = require("../models/offer.model");
+const Membership = require("../models/membership.model");
+const { refreshStatus } = require("../controllers/membership.controller");
+
+const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
+const dayName = (date) => new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
+
+const calculateInvoiceCharges = async ({ session, settings, kots }) => {
+  const totalHours = Number(session.totalHours || 1);
+  const extensionHours = Math.max(totalHours - 1, 0);
+  const children = Array.isArray(session.children) ? session.children : [];
+  let offer = session.offer && typeof session.offer === "object" ? session.offer : null;
+  if (!offer && session.offer) offer = await Offer.findById(session.offer);
+  if (offer && !offer.active) offer = null;
+
+  let specialPricingApplied = false;
+  const specialDayMatches = offer?.type === "special_pricing" && String(offer.rules?.day || "").toLowerCase() === dayName(new Date()).toLowerCase();
+  const childCharges = children.map((child) => {
+    const under3 = Number(child.age || 0) < 3;
+    const normalFirst = Number(under3 ? settings?.firstHourUnder3 : settings?.firstHourAbove3) || 0;
+    const normalExtension = Number(under3 ? settings?.extensionUnder3 : settings?.extensionAbove3) || 0;
+    const firstHourCharge = specialDayMatches ? Number(offer.rules?.firstHourPrice || 0) : normalFirst;
+    const extensionRate = specialDayMatches ? Number(offer.rules?.nextHourPrice || 0) : normalExtension;
+    if (specialDayMatches) specialPricingApplied = true;
+    return { name: child.name || "", dob: child.dob || null, age: Number(child.age || 0), firstHourCharge, extensionHours, extensionRate, childTotal: round(firstHourCharge + extensionHours * extensionRate) };
+  });
+  const normalSessionTotal = round(childCharges.reduce((sum, child) => sum + child.childTotal, 0));
+  let discountAmount = 0;
+  if (offer?.type === "discount" && children.length >= Number(offer.rules?.minKids || Infinity)) discountAmount = round(normalSessionTotal * Number(offer.value || 0) / 100);
+  let membershipApplied = false;
+  let membership = null;
+  const membershipId = session.membership?._id || session.membership;
+  if (membershipId) {
+    membership = await Membership.findById(membershipId);
+    if (membership) refreshStatus(membership);
+    if (membership?.status === "active" && membership.kidsAllowed >= children.length && membership.remainingPlayHours >= totalHours) membershipApplied = true;
+  }
+  const sessionTotal = membershipApplied ? 0 : round(normalSessionTotal - discountAmount);
+  const cafeItems = (kots || []).flatMap((kot) => (kot.items || []).map((item) => ({ name: item.name || "", quantity: Number(item.quantity || 1), unitPrice: Number(item.price || 0), lineTotal: Number(item.total || 0) })));
+  const cafeSubtotal = round(cafeItems.reduce((sum, item) => sum + item.lineTotal, 0));
+  const cafeGST = round(cafeSubtotal * 0.05);
+  const cafeTotal = round(cafeSubtotal + cafeGST);
+  const membershipPurchase = session.membershipPurchase || null;
+  const membershipPurchaseTotal = Number(membershipPurchase?.price || 0);
+  const grandTotal = round(sessionTotal + cafeTotal + membershipPurchaseTotal);
+  return { totalHours, extensionHours, childCharges, cafeItems, normalSessionTotal, sessionTotal, cafeSubtotal, cafeGST, cafeTotal, grandTotal, discountAmount, membershipApplied, membership, specialPricingApplied, offer: offer ? { name: offer.name, type: offer.type, value: offer.value } : null, membershipPurchase };
+};
+
+module.exports = { calculateInvoiceCharges, round };

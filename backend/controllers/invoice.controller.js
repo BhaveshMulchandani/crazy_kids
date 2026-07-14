@@ -50,7 +50,9 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
     unitPrice: Number(item?.price || 0),
     lineTotal: Number(item?.total || 0),
   })));
-  const cafeTotal = cafeItems.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0);
+  const cafeSubtotal = cafeItems.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0);
+  const cafeGST = Math.round(cafeSubtotal * 0.05 * 100) / 100;
+  const cafeTotal = cafeSubtotal + cafeGST;
   const grandTotal = sessionTotal + cafeTotal;
   const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
   const loyaltyPoints = Math.floor(Number(grandTotal || 0) / 100) * pointsPer100;
@@ -74,6 +76,8 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
     cafeItems,
     charges: {
       sessionTotal,
+      cafeSubtotal,
+      cafeGST,
       cafeTotal,
       grandTotal,
       loyaltyPoints,

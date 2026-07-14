@@ -54,9 +54,32 @@ const invoiceSchema = new mongoose.Schema(
 
     charges: {
       sessionTotal: { type: Number, default: 0 },
+      cafeSubtotal: { type: Number, default: 0 },
+      cafeGST: { type: Number, default: 0 },
       cafeTotal: { type: Number, default: 0 },
       grandTotal: { type: Number, default: 0 },
       loyaltyPoints: { type: Number, default: 0 },
+      normalSessionTotal: { type: Number, default: 0 },
+      discountAmount: { type: Number, default: 0 },
+      membershipPurchaseTotal: { type: Number, default: 0 },
+    },
+
+    offer: {
+      name: { type: String, default: "" },
+      type: { type: String, default: "" },
+      discountAmount: { type: Number, default: 0 },
+      specialPricingApplied: { type: Boolean, default: false },
+    },
+
+    membership: {
+      applied: { type: Boolean, default: false },
+      membership: { type: mongoose.Schema.Types.ObjectId, ref: "Membership", default: null },
+      planName: { type: String, default: "" },
+      hoursConsumed: { type: Number, default: 0 },
+      hoursBeforeSession: { type: Number, default: 0 },
+      remainingHours: { type: Number, default: 0 },
+      expiryDate: { type: Date, default: null },
+      purchase: { planName: { type: String, default: "" }, price: { type: Number, default: 0 } },
     },
 
     payment: {

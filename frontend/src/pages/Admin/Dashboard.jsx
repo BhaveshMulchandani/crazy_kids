@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import axios from "axios";
 import { StatCard } from "../../components/stat-card";
 import {
   Receipt,
@@ -135,6 +136,7 @@ function makeMockStats() {
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [membershipAnalytics, setMembershipAnalytics] = useState(null);
 
   useEffect(() => {
     // load mock data and auto-refresh every 30s
@@ -146,6 +148,20 @@ export default function Dashboard() {
     }
     load();
     const id = setInterval(load, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const loadMembershipAnalytics = async () => {
+      try {
+        const response = await axios.get(`${import.meta.env.VITE_API_URL}/memberships/analytics`, { withCredentials: true });
+        setMembershipAnalytics(response.data);
+      } catch (error) {
+        console.warn("Unable to load membership analytics", error);
+      }
+    };
+    loadMembershipAnalytics();
+    const id = setInterval(loadMembershipAnalytics, 30_000);
     return () => clearInterval(id);
   }, []);
 
@@ -275,6 +291,19 @@ export default function Dashboard() {
           accent="oklch(0.62 0.23 25)"
         />
       </div>
+
+      {membershipAnalytics && <>
+        <div className="grid grid-cols-4 gap-5">
+          <StatCard label="Memberships Sold" value={membershipAnalytics.totalSold} icon={Users} accent="oklch(0.58 0.21 260)" />
+          <StatCard label="Active Memberships" value={membershipAnalytics.active} hint={`${membershipAnalytics.expired} expired`} icon={Timer} accent="oklch(0.65 0.18 145)" />
+          <StatCard label="Membership Revenue" value={`₹${Number(membershipAnalytics.revenue).toLocaleString()}`} icon={IndianRupee} accent="oklch(0.78 0.17 75)" />
+          <StatCard label="Hours Consumed" value={`${membershipAnalytics.hoursConsumed}h`} hint={`${membershipAnalytics.remainingHours}h remaining`} icon={TrendingUp} accent="oklch(0.62 0.23 25)" />
+        </div>
+        <div className="grid grid-cols-2 gap-5">
+          <div className="surface-card p-5"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p><p className="mt-1 text-sm text-muted-foreground">{membershipAnalytics.expiringSoon.length} memberships expire within 7 days.</p></div>
+          <div className="surface-card p-5"><h3 className="font-semibold">Recently purchased memberships</h3><div className="mt-2 space-y-1 text-sm">{membershipAnalytics.recent.slice(0, 3).map((item) => <div key={item._id} className="flex justify-between"><span>{item.customer?.parentName} · {item.planName}</span><span className="text-muted-foreground">{new Date(item.purchaseDate).toLocaleDateString()}</span></div>)}{membershipAnalytics.recent.length === 0 && <span className="text-muted-foreground">No memberships purchased yet.</span>}</div></div>
+        </div>
+      </>}
 
       <div className="grid grid-cols-4 gap-5">
         <StatCard

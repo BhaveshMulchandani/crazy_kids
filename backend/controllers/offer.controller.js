@@ -55,6 +55,10 @@ const createOffer = async (req, res) => {
       }
     }
 
+    if (Number(value) < 0 || (type === "discount" && Number(value) > 100)) {
+      return res.status(400).json({ message: "Offer value is invalid" });
+    }
+
     const offer = await offermodel.create({
       name,
       description,

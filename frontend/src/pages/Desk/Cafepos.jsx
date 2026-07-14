@@ -207,6 +207,7 @@ function Cafepos() {
   const [searchLoading, setSearchLoading] = React.useState(false);
   const [customer, setCustomer] = React.useState(null);
   const [tableNumber, setTableNumber] = React.useState("");
+  const [tableNumberError, setTableNumberError] = React.useState("");
   const [cat, setCat] = React.useState("all");
   const [cart, setCart] = React.useState([]);
   const [submitting, setSubmitting] = React.useState(false);
@@ -329,7 +330,7 @@ function Cafepos() {
       return;
     }
     if (!tableNumber.trim()) {
-      toast.error("Enter a table number");
+      setTableNumberError("Table Number is required.");
       return;
     }
     if (cart.length === 0) {
@@ -511,11 +512,15 @@ function Cafepos() {
             <div className="mt-3">
               <Label className="text-xs uppercase tracking-wide text-muted-foreground">Table Number</Label>
               <Input
-                className="mt-1 h-10"
+                className={cn("mt-1 h-10", tableNumberError && "border-red-500")}
                 placeholder="e.g. T1, T2…"
                 value={tableNumber}
-                onChange={(e) => setTableNumber(e.target.value)}
+                onChange={(e) => {
+                  setTableNumber(e.target.value);
+                  setTableNumberError("");
+                }}
               />
+              {tableNumberError && <p className="mt-1 text-xs text-red-500">{tableNumberError}</p>}
             </div>
           </div>
 

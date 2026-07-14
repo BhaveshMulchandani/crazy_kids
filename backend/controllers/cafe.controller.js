@@ -49,7 +49,6 @@ const searchCustomer = async (req, res) => {
 const createKOT = async (req, res) => {
   try {
 
-    console.log("before",req.body)
     const {
       sessionId,
       tableNumber,
@@ -66,7 +65,7 @@ const createKOT = async (req, res) => {
 
     if (!tableNumber?.trim()) {
       return res.status(400).json({
-        message: "Table number is required",
+        message: "Table Number is required.",
       });
     }
 
