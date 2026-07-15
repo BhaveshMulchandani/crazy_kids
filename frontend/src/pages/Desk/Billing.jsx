@@ -477,6 +477,17 @@ function BillingPage() {
     setErrors({});
   };
 
+  // Only clears the search box/results and the "matched customer" indicator
+  // — unlike reset(), it must NOT wipe parentName/mobile/city/children etc,
+  // since those may have already been filled in (via a search match or by
+  // hand) and the operator is just dismissing the search UI, not starting
+  // the whole form over.
+  const clearSearch = () => {
+    setLookup("");
+    setSearchResults([]);
+    setCustomer(null);
+  };
+
   const validChildren = children.filter((c) => c.name.trim() && c.dob);
   const estimatedCharge = calculateEstimatedSessionCharge(
     validChildren,
@@ -507,18 +518,24 @@ function BillingPage() {
               onKeyDown={(e) => e.key === "Enter" && findCustomer()}
             />
             {searchResults.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full rounded-lg border bg-background shadow-lg">
+              <div className="absolute z-10 mt-1.5 w-full rounded-lg border border-border bg-white shadow-lg overflow-hidden">
                 {searchResults.map((result) => (
                   <button
                     key={result._id}
                     type="button"
-                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-secondary"
+                    className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left hover:bg-secondary/60 border-b border-border/60 last:border-b-0"
                     onClick={() => applyCustomer(result)}
                   >
-                    <span>
-                      {result.parentName} · {result.mobileNumber}
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-foreground truncate">
+                        {result.parentName}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {result.mobileNumber}
+                        {result.bandNumber ? ` · Band ${result.bandNumber}` : ""}
+                      </span>
                     </span>
-                    <span className="text-xs text-primary">Apply</span>
+                    <span className="shrink-0 text-xs font-semibold text-primary">Apply</span>
                   </button>
                 ))}
               </div>
@@ -527,24 +544,24 @@ function BillingPage() {
           <Button
             onClick={findCustomer}
             className="h-11 px-6"
-            style={{ background: "var(--gradient-primary)" }}
+            style={{ background: "var(--primary)" }}
           >
             <Search className="h-4 w-4 mr-2" /> Find
           </Button>
           {customer && (
-            <Button variant="outline" onClick={reset} className="h-11">
+            <Button variant="outline" onClick={clearSearch} className="h-11">
               <X className="h-4 w-4 mr-1" /> Clear
             </Button>
           )}
         </div>
         {customer && (
-          <div className="mt-3 text-xs text-muted-foreground">
-            <span className="font-mono text-primary">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-mono font-medium text-primary">
               {customer.customer_code}
-            </span>{" "}
-            · {customer.visit_count ?? 0} visits · ₹
-            {Number(customer.total_spent ?? 0).toLocaleString()} spent ·{" "}
-            {customer.reward_points ?? 0} pts
+            </span>
+            <span>{customer.visit_count ?? 0} visits</span>
+            <span>₹{Number(customer.total_spent ?? 0).toLocaleString()} spent</span>
+            <span>{customer.reward_points ?? 0} pts</span>
           </div>
         )}
         {membership && (
@@ -616,6 +633,8 @@ function BillingPage() {
             <div className="col-span-2 space-y-2">
               <Label>City (optional)</Label>
               <Input
+                name="city"
+                autoComplete="address-level2"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
                 placeholder="Ahmedabad"
@@ -872,7 +891,7 @@ function BillingPage() {
               onClick={submit}
               disabled={submitting}
               className="h-11 px-8"
-              style={{ background: "var(--gradient-primary)" }}
+              style={{ background: "var(--primary)" }}
             >
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               <PlayCircle className="mr-2 h-4 w-4" />

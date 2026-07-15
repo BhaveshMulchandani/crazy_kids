@@ -91,9 +91,25 @@ const dashboardStats = async (req, res) => {
             ],
             offerUsage: [
               { $match: { "offer.name": { $nin: ["", null] } } },
-              { $group: { _id: "$offer.name", value: { $sum: 1 } } },
+              {
+                $group: {
+                  _id: "$offer.name",
+                  value: { $sum: 1 },
+                  totalDiscount: { $sum: "$charges.discountAmount" },
+                },
+              },
               { $sort: { value: -1 } },
               { $limit: 8 },
+            ],
+            offerTotals: [
+              { $match: { "offer.name": { $nin: ["", null] } } },
+              {
+                $group: {
+                  _id: null,
+                  usageCount: { $sum: 1 },
+                  totalDiscount: { $sum: "$charges.discountAmount" },
+                },
+              },
             ],
             bestSellingCafeItems: [
               { $unwind: "$cafeItems" },
@@ -165,6 +181,16 @@ const dashboardStats = async (req, res) => {
       revenueTrend.push({ date: key, revenue: trendMap.get(key) || 0 });
     }
 
+    const offerTotals = facets.offerTotals[0] || { usageCount: 0, totalDiscount: 0 };
+    const mostUsedOffer = facets.offerUsage[0] || null;
+    const offerAnalytics = {
+      mostUsedOffer: mostUsedOffer?._id || null,
+      mostUsedOfferCount: mostUsedOffer?.value || 0,
+      usageCount: offerTotals.usageCount,
+      totalDiscountGiven: offerTotals.totalDiscount,
+      revenueSaved: offerTotals.totalDiscount,
+    };
+
     return res.status(200).json({
       totals,
       today: { sales: todaySales, customers: todayCustomers },
@@ -176,6 +202,7 @@ const dashboardStats = async (req, res) => {
       recentTransactions: facets.recentTransactions,
       revenueTrend,
       offerUsage: facets.offerUsage,
+      offerAnalytics,
       bestSellingCafeItems: facets.bestSellingCafeItems,
       activeSessions,
     });
@@ -184,95 +211,113 @@ const dashboardStats = async (req, res) => {
   }
 };
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Server-side paginated + searchable customer directory. One row per unique
+// mobileNumber (their latest completed session), grouped/paginated entirely
+// via aggregation so the sessions collection is never pulled into app memory
+// wholesale — only the requested page of grouped customers is scanned in
+// detail, and per-customer spend/points are looked up only for that page's
+// mobile numbers (not the whole invoice collection).
 const fetchcustomers = async (req, res) => {
   try {
-    // Latest completed session of every customer
-    const sessions = await sessionmodel
-      .find({ status: "completed" })
-      .select(
-        "_id sessionNumber parentName mobileNumber bandNumber children createdAt"
-      )
-      .sort({ createdAt: -1 })
-      .lean();
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+    const search = String(req.query.search || "").trim();
 
-    if (!sessions.length) {
+    const pipeline = [
+      { $match: { status: "completed" } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: "$mobileNumber",
+          latestSession: { $first: "$$ROOT" },
+          visit_count: { $sum: 1 },
+        },
+      },
+    ];
+
+    if (search) {
+      const pattern = escapeRegex(search);
+      pipeline.push({
+        $match: {
+          $or: [
+            { "latestSession.parentName": { $regex: pattern, $options: "i" } },
+            { "latestSession.mobileNumber": { $regex: pattern, $options: "i" } },
+            { "latestSession.bandNumber": { $regex: pattern, $options: "i" } },
+            { "latestSession.sessionNumber": { $regex: pattern, $options: "i" } },
+            { "latestSession.children.name": { $regex: pattern, $options: "i" } },
+          ],
+        },
+      });
+    }
+
+    pipeline.push(
+      { $sort: { "latestSession.createdAt": -1 } },
+      {
+        $facet: {
+          data: [{ $skip: skip }, { $limit: limit }],
+          totalCount: [{ $count: "count" }],
+        },
+      }
+    );
+
+    const [result] = await sessionmodel.aggregate(pipeline);
+    const rows = result?.data || [];
+    const total = result?.totalCount?.[0]?.count || 0;
+
+    if (!rows.length) {
       return res.status(200).json({
         success: true,
         count: 0,
+        total,
+        page,
+        limit,
         customers: [],
       });
     }
 
-    // Unique mobile numbers
-    const mobileNumbers = [
-      ...new Set(sessions.map((session) => session.mobileNumber)),
-    ];
+    const mobileNumbers = rows.map((row) => row._id);
 
-    // All completed sessions of those customers
-    const completedSessions = await sessionmodel
-      .find({
-        status: "completed",
-        mobileNumber: { $in: mobileNumbers },
-      })
-      .select("_id mobileNumber")
-      .lean();
+    const invoiceStats = await Invoice.aggregate([
+      { $match: { "customer.mobileNumber": { $in: mobileNumbers } } },
+      {
+        $group: {
+          _id: "$customer.mobileNumber",
+          total_spent: { $sum: "$charges.grandTotal" },
+          reward_points: { $sum: "$charges.loyaltyPoints" },
+        },
+      },
+    ]);
+    const statsMap = new Map(invoiceStats.map((row) => [row._id, row]));
 
-    // All invoices
-    const invoices = await Invoice.find({
-      session: { $in: completedSessions.map((s) => s._id) },
-    })
-      .select("session charges.grandTotal charges.loyaltyPoints")
-      .lean();
+    const customers = rows.map((row) => {
+      const session = row.latestSession;
+      const stats = statsMap.get(row._id) || { total_spent: 0, reward_points: 0 };
 
-    // Mobile lookup
-    const sessionMobileMap = new Map(
-      completedSessions.map((s) => [String(s._id), s.mobileNumber])
-    );
-
-    // Stats initialize
-    const statsMap = new Map();
-
-    mobileNumbers.forEach((mobile) => {
-      statsMap.set(mobile, {
-        visit_count: 0,
-        total_spent: 0,
-        reward_points: 0,
-      });
-    });
-
-    // Visit count
-    completedSessions.forEach((session) => {
-      statsMap.get(session.mobileNumber).visit_count += 1;
-    });
-
-    // Total spent & reward points
-    invoices.forEach((invoice) => {
-      const mobile = sessionMobileMap.get(String(invoice.session));
-
-      if (!mobile) return;
-
-      const stats = statsMap.get(mobile);
-
-      stats.total_spent += Number(invoice.charges?.grandTotal || 0);
-      stats.reward_points += Number(invoice.charges?.loyaltyPoints || 0);
-    });
-
-    // One customer per mobile number
-    const customersMap = new Map();
-
-    sessions.forEach((session) => {
-      if (!customersMap.has(session.mobileNumber)) {
-        customersMap.set(session.mobileNumber, {
-          ...session,
-          ...statsMap.get(session.mobileNumber),
-        });
-      }
+      return {
+        id: String(session._id),
+        _id: session._id,
+        sessionNumber: session.sessionNumber,
+        parentName: session.parentName,
+        mobileNumber: session.mobileNumber,
+        bandNumber: session.bandNumber,
+        children: session.children,
+        createdAt: session.createdAt,
+        visit_count: row.visit_count,
+        total_spent: Number(stats.total_spent || 0),
+        reward_points: Number(stats.reward_points || 0),
+      };
     });
 
     return res.status(200).json({
       success: true,
-      count: customersMap.size,
-      customers: [...customersMap.values()],
+      count: customers.length,
+      total,
+      page,
+      limit,
+      customers,
     });
   } catch (err) {
     console.error(err);
@@ -493,24 +538,34 @@ const monthlyCustomerReportPdf = async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     doc.pipe(res);
 
+    // Widths are sized so every header label fits within two wrapped lines
+    // at HEADER_FONT_SIZE (verified against this exact label set) — the
+    // previous single-line, no-wrap headers routinely overflowed into the
+    // neighbouring column. Data cells stay single-line with an ellipsis,
+    // except childNames which is allowed to wrap across multiple lines
+    // (rows below size themselves to whichever is tallest).
     const columns = [
-      { key: "customerId", label: "Customer ID", width: 55 },
-      { key: "childNames", label: "Child Name(s)", width: 85 },
-      { key: "parentName", label: "Parent Name", width: 70 },
-      { key: "mobileNumber", label: "Mobile Number", width: 75 },
-      { key: "city", label: "City", width: 60 },
-      { key: "offerOrMembership", label: "Offer / Membership", width: 80 },
-      { key: "visits", label: "Visits", width: 35, align: "right" },
-      { key: "sessionTotal", label: "Session Total", width: 60, align: "right" },
-      { key: "cafeTotal", label: "Cafe Total", width: 55, align: "right" },
-      { key: "socksQty", label: "Socks Qty", width: 45, align: "right" },
-      { key: "rewardPoints", label: "Points", width: 45, align: "right" },
-      { key: "totalSpent", label: "Total Spent", width: 65, align: "right" },
+      { key: "customerId", label: "Customer ID", width: 55, align: "left" },
+      { key: "childNames", label: "Child Name(s)", width: 100, align: "left", wrap: true },
+      { key: "parentName", label: "Parent Name", width: 76, align: "left" },
+      { key: "mobileNumber", label: "Mobile Number", width: 72, align: "left" },
+      { key: "city", label: "City", width: 50, align: "left" },
+      { key: "offerOrMembership", label: "Offer / Membership", width: 82, align: "left" },
+      { key: "visits", label: "Visits", width: 38, align: "right" },
+      { key: "sessionTotal", label: "Session Total", width: 62, align: "right" },
+      { key: "cafeTotal", label: "Cafe Total", width: 58, align: "right" },
+      { key: "socksQty", label: "Socks Qty", width: 50, align: "right" },
+      { key: "rewardPoints", label: "Points", width: 44, align: "right" },
+      { key: "totalSpent", label: "Total Spent", width: 66, align: "right" },
     ];
     const tableLeft = doc.page.margins.left;
     const tableWidth = columns.reduce((sum, c) => sum + c.width, 0);
-    const rowHeight = 22;
-    const headerHeight = 24;
+    const CELL_PAD_X = 6;
+    const CELL_PAD_Y = 7;
+    const HEADER_FONT_SIZE = 7.5;
+    const CELL_FONT_SIZE = 8;
+    const MIN_ROW_HEIGHT = 24;
+    const headerHeight = 32;
     // Fixed band (in points) reserved at the bottom of every page for the
     // footer, so content never has to share a page-break decision with it.
     const FOOTER_BAND_HEIGHT = 28;
@@ -520,6 +575,7 @@ const monthlyCustomerReportPdf = async (req, res) => {
     const contentBottom = () => doc.page.height - doc.page.margins.bottom - FOOTER_BAND_HEIGHT;
 
     const drawDocHeader = () => {
+      doc.rect(0, 0, doc.page.width, 6).fill("#2563eb");
       doc.font("Helvetica-Bold").fontSize(18).fillColor("#0f172a").text("Crazy Kids", tableLeft, 40);
       doc.font("Helvetica-Bold").fontSize(13).fillColor("#334155").text("Monthly Customer Report", tableLeft, 62);
       doc.font("Helvetica").fontSize(10).fillColor("#64748b");
@@ -532,9 +588,12 @@ const monthlyCustomerReportPdf = async (req, res) => {
     const drawTableHeader = (y) => {
       doc.rect(tableLeft, y, tableWidth, headerHeight).fill("#0f172a");
       let x = tableLeft;
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#ffffff");
+      doc.font("Helvetica-Bold").fontSize(HEADER_FONT_SIZE).fillColor("#ffffff");
       columns.forEach((col) => {
-        doc.text(col.label, x + 4, y + 8, { width: col.width - 8, align: col.align || "left", lineBreak: false });
+        doc.text(col.label, x + CELL_PAD_X, y + 7, {
+          width: col.width - CELL_PAD_X * 2,
+          align: col.align || "left",
+        });
         x += col.width;
       });
       return y + headerHeight;
@@ -579,19 +638,9 @@ const monthlyCustomerReportPdf = async (req, res) => {
     let y = drawDocHeader();
     y = drawTableHeader(y);
 
+    const childNamesCol = columns.find((col) => col.key === "childNames");
+
     customers.forEach((customer, index) => {
-      if (y + rowHeight > contentBottom()) {
-        doc.addPage();
-        y = drawDocHeader();
-        y = drawTableHeader(y);
-      }
-
-      if (index % 2 === 1) {
-        doc.rect(tableLeft, y, tableWidth, rowHeight).fill("#f8fafc");
-      }
-
-      let x = tableLeft;
-      doc.font("Helvetica").fontSize(8.5).fillColor("#1e293b");
       const cells = {
         customerId: customer.customerId,
         childNames: customer.childNames.join(", ") || "-",
@@ -606,8 +655,30 @@ const monthlyCustomerReportPdf = async (req, res) => {
         rewardPoints: String(customer.rewardPoints),
         totalSpent: `Rs. ${Number(customer.totalSpent).toLocaleString("en-IN")}`,
       };
+
+      doc.font("Helvetica").fontSize(CELL_FONT_SIZE);
+      const wrappedHeight = doc.heightOfString(cells.childNames, {
+        width: childNamesCol.width - CELL_PAD_X * 2,
+      });
+      const rowHeight = Math.max(MIN_ROW_HEIGHT, wrappedHeight + CELL_PAD_Y * 2);
+
+      if (y + rowHeight > contentBottom()) {
+        doc.addPage();
+        y = drawDocHeader();
+        y = drawTableHeader(y);
+      }
+
+      if (index % 2 === 1) {
+        doc.rect(tableLeft, y, tableWidth, rowHeight).fill("#f8fafc");
+      }
+
+      let x = tableLeft;
+      doc.font("Helvetica").fontSize(CELL_FONT_SIZE).fillColor("#1e293b");
       columns.forEach((col) => {
-        doc.text(cells[col.key], x + 4, y + 6, { width: col.width - 8, align: col.align || "left", lineBreak: false });
+        const textOptions = col.wrap
+          ? { width: col.width - CELL_PAD_X * 2, align: col.align || "left" }
+          : { width: col.width - CELL_PAD_X * 2, align: col.align || "left", lineBreak: false, ellipsis: true };
+        doc.text(cells[col.key], x + CELL_PAD_X, y + CELL_PAD_Y - 3, textOptions);
         x += col.width;
       });
 
@@ -620,8 +691,43 @@ const monthlyCustomerReportPdf = async (req, res) => {
       y += 30;
     }
 
-    // Summary block — reserve enough room for the heading + 7 lines, or
-    // start a fresh page if it can't fit above the footer band.
+    // Summary / revenue-by-city are rendered as bordered "card" blocks —
+    // a dark title bar plus zebra-striped label/value rows — matching the
+    // table's visual language instead of a bare list of lines.
+    const CARD_HEADER_HEIGHT = 26;
+    const CARD_ROW_HEIGHT = 20;
+    const CARD_GAP = 18;
+
+    const drawCardSection = (title, rows, startY) => {
+      const blockHeight = CARD_HEADER_HEIGHT + rows.length * CARD_ROW_HEIGHT;
+      let sectionY = startY;
+      if (sectionY + blockHeight > contentBottom()) {
+        doc.addPage();
+        sectionY = drawDocHeader();
+      }
+
+      doc.rect(tableLeft, sectionY, tableWidth, CARD_HEADER_HEIGHT).fill("#0f172a");
+      doc.font("Helvetica-Bold").fontSize(10.5).fillColor("#ffffff")
+        .text(title, tableLeft + 10, sectionY + 7, { lineBreak: false });
+
+      let rowY = sectionY + CARD_HEADER_HEIGHT;
+      rows.forEach(([label, value], index) => {
+        if (index % 2 === 1) {
+          doc.rect(tableLeft, rowY, tableWidth, CARD_ROW_HEIGHT).fill("#f8fafc");
+        }
+        doc.font("Helvetica").fontSize(9.5).fillColor("#334155")
+          .text(label, tableLeft + 10, rowY + 5, { width: tableWidth * 0.6, lineBreak: false, ellipsis: true });
+        doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#0f172a")
+          .text(value, tableLeft + 10, rowY + 5, { width: tableWidth - 20, align: "right", lineBreak: false });
+        rowY += CARD_ROW_HEIGHT;
+      });
+
+      doc.rect(tableLeft, sectionY, tableWidth, blockHeight)
+        .strokeColor("#e2e8f0").lineWidth(0.75).stroke();
+
+      return rowY + CARD_GAP;
+    };
+
     const summaryLines = [
       ["Total Customers", String(summary.totalCustomers)],
       ["Total Visits", String(summary.totalVisits)],
@@ -631,40 +737,15 @@ const monthlyCustomerReportPdf = async (req, res) => {
       ["Total Reward Points", String(summary.totalRewardPoints)],
       ["Total Socks Issued", String(summary.totalSocksIssued)],
     ];
-    const SUMMARY_BLOCK_HEIGHT = 20 + 14 + 18 + summaryLines.length * 16;
-    if (y + SUMMARY_BLOCK_HEIGHT > contentBottom()) {
-      doc.addPage();
-      y = drawDocHeader();
-    }
-    y += 20;
-    doc.moveTo(tableLeft, y).lineTo(tableLeft + tableWidth, y).strokeColor("#cbd5e1").lineWidth(1).stroke();
-    y += 14;
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text("Summary", tableLeft, y, { lineBreak: false });
-    y += 18;
 
-    summaryLines.forEach(([label, value]) => {
-      doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#334155").text(label, tableLeft, y, { width: 220, lineBreak: false });
-      doc.font("Helvetica").fontSize(9.5).fillColor("#334155").text(value, tableLeft + 220, y, { lineBreak: false });
-      y += 16;
-    });
+    y = drawCardSection("Summary", summaryLines, y + CARD_GAP);
 
     if (revenueByCity.length > 0) {
-      const cityBlockHeight = 20 + 14 + 18 + revenueByCity.length * 16;
-      if (y + cityBlockHeight > contentBottom()) {
-        doc.addPage();
-        y = drawDocHeader();
-      }
-      y += 20;
-      doc.moveTo(tableLeft, y).lineTo(tableLeft + tableWidth, y).strokeColor("#cbd5e1").lineWidth(1).stroke();
-      y += 14;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text("Revenue By City", tableLeft, y, { lineBreak: false });
-      y += 18;
-
-      revenueByCity.forEach(({ city, revenue }) => {
-        doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#334155").text(city, tableLeft, y, { width: 220, lineBreak: false });
-        doc.font("Helvetica").fontSize(9.5).fillColor("#334155").text(`Rs. ${Number(revenue).toLocaleString("en-IN")}`, tableLeft + 220, y, { lineBreak: false });
-        y += 16;
-      });
+      const cityRows = revenueByCity.map(({ city, revenue }) => [
+        city,
+        `Rs. ${Number(revenue).toLocaleString("en-IN")}`,
+      ]);
+      y = drawCardSection("Revenue By City", cityRows, y);
     }
 
     const pageRange = doc.bufferedPageRange();

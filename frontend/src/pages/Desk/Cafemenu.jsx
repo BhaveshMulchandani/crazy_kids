@@ -460,7 +460,7 @@ function ItemDialog({ open, setOpen, item, onSaved, setEditing }) {
           </Button>
           <Button
             onClick={save}
-            style={{ background: "var(--gradient-primary)" }}
+            style={{ background: "var(--primary)" }}
           >
             Save
           </Button>
@@ -614,7 +614,7 @@ function Cafemenu() {
         </div>
         <Button
           onClick={newItem}
-          style={{ background: "var(--gradient-primary)" }}
+          style={{ background: "var(--primary)" }}
         >
           <Plus className="h-4 w-4 mr-2" /> Add item
         </Button>
@@ -647,7 +647,7 @@ function Cafemenu() {
                         !item.available ? "opacity-70 grayscale" : "",
                       )}
                     >
-                      <div className="aspect-square rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 grid place-items-center mb-3 text-3xl">
+                      <div className="aspect-square rounded-xl bg-secondary/50 grid place-items-center mb-3 text-3xl">
                         {item.image ? (
                           <img
                             src={item.image}

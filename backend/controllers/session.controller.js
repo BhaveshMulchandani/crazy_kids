@@ -684,6 +684,53 @@ const runningsession = async (req, res) => {
   }
 };
 
+// Always the latest N (default 5) completed sessions, sorted by when they
+// actually ended — used by the desk "Recently closed" panel, which must
+// reflect the real checkout history rather than only sessions completed
+// during the current browser tab's lifetime.
+const recentCompletedSessions = async (req, res) => {
+  try {
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 5));
+
+    const sessions = await sessionmodel
+      .find({ status: "completed" })
+      .sort({ actualEndTime: -1, updatedAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const sessionIds = sessions.map((session) => session._id);
+    const invoices = await Invoice.find({ session: { $in: sessionIds } })
+      .select("session invoiceNumber charges.grandTotal")
+      .lean();
+    const invoiceMap = new Map(invoices.map((invoice) => [String(invoice.session), invoice]));
+
+    const result = sessions.map((session) => {
+      const invoice = invoiceMap.get(String(session._id));
+
+      return {
+        _id: session._id,
+        parentName: session.parentName,
+        mobileNumber: session.mobileNumber,
+        children: session.children,
+        closed_at: session.actualEndTime,
+        invoice_no: invoice?.invoiceNumber || "",
+        invoiceData: invoice ? { charges: invoice.charges } : null,
+      };
+    });
+
+    return res.status(200).json({
+      message: "Recently completed sessions fetched successfully",
+      count: result.length,
+      sessions: result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 const getSessionKOTs = async (
   req,
   res
@@ -774,5 +821,5 @@ const searchBillingCustomer = async (req, res) => {
 
 
 module.exports = {
-  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, runningsession, getSessionKOTs, pauseChild, resumeChild
+  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, runningsession, recentCompletedSessions, getSessionKOTs, pauseChild, resumeChild
 };

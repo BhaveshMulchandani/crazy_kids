@@ -2,64 +2,27 @@ const Invoice = require("../models/invoice.model");
 const Session = require("../models/session.model");
 const KOT = require("../models/cafe.model");
 const PriceSetting = require("../models/price.model");
+const { calculateInvoiceCharges } = require("../services/billing.service");
 
 const generateInvoiceNumber = async () => {
   const count = await Invoice.countDocuments();
   return `INV-${String(count + 1).padStart(5, "0")}`;
 };
 
+// Mirrors the invoice payload built at session completion time
+// (session.controller.js:completesession) so offer discounts and active
+// memberships are reflected the same way regardless of which route created
+// the invoice. Does not mutate/consume membership hours — that side effect
+// belongs solely to the session-completion flow.
 const buildInvoicePayload = async ({ session, kots, settings }) => {
-  const children = Array.isArray(session.children) ? session.children : [];
-  const totalHours = Number(session.totalHours || 1);
-  const extensionHours = Math.max(totalHours - 1, 0);
-  const pauseTimeMinutes = Number(session.totalPausedMinutes || 0);
+  const calculation = await calculateInvoiceCharges({ session, settings, kots });
   const startTime = session.startTime ? new Date(session.startTime) : null;
   const endTime = session.actualEndTime ? new Date(session.actualEndTime) : null;
   const actualDurationMinutes = startTime && endTime
     ? Math.max(0, Math.round((endTime.getTime() - startTime.getTime()) / 60000))
     : 0;
-
-  const childCharges = children.map((child) => {
-    const age = Number(child?.age ?? 0);
-    const isUnder3 = age < 3;
-    const firstHourRate = isUnder3
-      ? Number(settings?.firstHourUnder3 ?? 0)
-      : Number(settings?.firstHourAbove3 ?? 0);
-    const extensionRate = isUnder3
-      ? Number(settings?.extensionUnder3 ?? 0)
-      : Number(settings?.extensionAbove3 ?? 0);
-    const firstHourCharge = firstHourRate;
-    const extensionCharge = Math.max(totalHours - 1, 0) * extensionRate;
-    const childTotal = firstHourCharge + extensionCharge;
-
-    return {
-      name: child?.name || "",
-      dob: child?.dob || null,
-      age,
-      firstHourCharge,
-      extensionHours: Math.max(totalHours - 1, 0),
-      extensionRate,
-      childTotal,
-      socksOpted: Boolean(child?.socksOpted),
-    };
-  });
-
-  const sessionTotal = childCharges.reduce((sum, child) => sum + Number(child.childTotal || 0), 0);
-  const cafeItems = (kots || []).flatMap((kot) => (kot?.items || []).map((item) => ({
-    name: item?.name || "",
-    quantity: Number(item?.quantity || 1),
-    unitPrice: Number(item?.price || 0),
-    lineTotal: Number(item?.total || 0),
-  })));
-  const cafeSubtotal = cafeItems.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0);
-  const cafeGST = Math.round(cafeSubtotal * 0.05 * 100) / 100;
-  const cafeTotal = cafeSubtotal + cafeGST;
-  const socksQty = children.filter((child) => child?.socksOpted).length;
-  const socksRate = Number(settings?.socksCost || 0);
-  const socksTotal = socksQty * socksRate;
-  const grandTotal = sessionTotal + cafeTotal + socksTotal;
   const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
-  const loyaltyPoints = Math.floor(Number(grandTotal || 0) / 100) * pointsPer100;
+  const loyaltyPoints = Math.floor(Number(calculation.grandTotal || 0) / 100) * pointsPer100;
 
   return {
     customer: {
@@ -70,26 +33,48 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
       gender: session.gender || "",
       city: session.city || "",
     },
-    children: childCharges,
+    children: calculation.childCharges,
     sessionDetails: {
       startTime: session.startTime || null,
       endTime: session.actualEndTime || null,
       actualDurationMinutes,
-      totalHours,
-      extensionHours,
-      pauseTimeMinutes,
+      totalHours: calculation.totalHours,
+      extensionHours: calculation.extensionHours,
+      pauseTimeMinutes: Number(session.totalPausedMinutes || 0),
     },
-    cafeItems,
+    cafeItems: calculation.cafeItems,
     charges: {
-      sessionTotal,
-      cafeSubtotal,
-      cafeGST,
-      cafeTotal,
-      grandTotal,
+      sessionTotal: calculation.sessionTotal,
+      cafeSubtotal: calculation.cafeSubtotal,
+      cafeGST: calculation.cafeGST,
+      cafeTotal: calculation.cafeTotal,
+      grandTotal: calculation.grandTotal,
       loyaltyPoints,
-      socksQty,
-      socksRate,
-      socksTotal,
+      normalSessionTotal: calculation.normalSessionTotal,
+      discountAmount: calculation.discountAmount,
+      membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0),
+      socksQty: calculation.socksQty,
+      socksRate: calculation.socksRate,
+      socksTotal: calculation.socksTotal,
+    },
+    offer: {
+      name: calculation.offer?.name || "",
+      type: calculation.offer?.type || "",
+      discountAmount: calculation.discountAmount,
+      specialPricingApplied: calculation.specialPricingApplied,
+    },
+    membership: {
+      applied: calculation.membershipApplied,
+      membership: calculation.membership?._id || null,
+      planName: calculation.membership?.planName || "",
+      hoursConsumed: calculation.membershipApplied ? calculation.totalHours : 0,
+      hoursBeforeSession: calculation.membershipApplied ? calculation.membership.remainingPlayHours : 0,
+      remainingHours: calculation.membershipApplied ? calculation.membership.remainingPlayHours : 0,
+      expiryDate: calculation.membershipApplied ? calculation.membership.expiryDate : null,
+      purchase: {
+        planName: calculation.membershipPurchase?.planName || "",
+        price: Number(calculation.membershipPurchase?.price || 0),
+      },
     },
     payment: {
       status: session.paymentStatus || "pending",
@@ -100,7 +85,7 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
         }))
         : [],
       amountPaid: Number(session.amountPaid || 0),
-      pendingAmount: Math.max(grandTotal - Number(session.amountPaid || 0), 0),
+      pendingAmount: Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0),
     },
   };
 };

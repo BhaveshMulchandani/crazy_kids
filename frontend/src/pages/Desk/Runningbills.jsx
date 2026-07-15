@@ -15,7 +15,6 @@ import {
   Coffee,
   Printer,
   Baby,
-  PlayCircle,
   Clock,
   ChevronDown,
 } from "lucide-react";
@@ -427,10 +426,15 @@ const DialogTitle = ({ className, ...props }) => (
   />
 );
 
-const Row = ({ k, v }) => (
-  <div className="flex justify-between">
-    <span className="text-muted-foreground">{k}</span>
-    <span className="font-medium">{v}</span>
+const Row = ({ k, v, bold, accent }) => (
+  <div className={`flex items-baseline justify-between gap-3 py-0.5 ${bold ? "text-sm" : ""}`}>
+    <span className={bold ? "font-semibold text-foreground" : "text-muted-foreground"}>{k}</span>
+    <span
+      className={`tabular-nums ${bold ? "font-bold text-base" : "font-medium"}`}
+      style={accent ? { color: accent } : undefined}
+    >
+      {v}
+    </span>
   </div>
 );
 
@@ -486,13 +490,13 @@ const BillCard = ({
         highlighted ? "ring-2 ring-blue-500 ring-offset-2" : ""
       }`}
     >
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs text-muted-foreground font-mono">
+          <div className="text-xs font-medium text-muted-foreground font-mono tracking-tight">
             {bill.sessionNumber}
           </div>
-          <div className="flex items-center gap-2">
-            <div className="font-semibold text-lg leading-tight">
+          <div className="flex items-center gap-2 mt-0.5">
+            <div className="font-bold text-lg leading-tight tracking-tight">
               {bill.parentName}
             </div>
 
@@ -502,7 +506,7 @@ const BillCard = ({
               </span>
             )}
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-xs text-muted-foreground mt-0.5">
             {bill.mobileNumber}
           </div>
         </div>
@@ -551,7 +555,7 @@ const BillCard = ({
             >
               <span className="flex min-w-0 items-center gap-1">
                 {isBirthday ? "🎂" : <Baby className="h-3 w-3 shrink-0" />}
-                <span className="truncate">
+                <span className="truncate font-medium">
                   {c.name} · {c.age}y
                 </span>
                 {c.socksOpted && <span title="Socks opted">🧦</span>}
@@ -587,99 +591,73 @@ const BillCard = ({
         })}
       </div>
 
-      <div className="mt-4 font-mono text-3xl font-semibold tabular-nums gradient-text">
+      <div className="mt-4 font-mono text-3xl font-bold tabular-nums text-primary">
         {getTimerText()}
       </div>
-      <div className="text-xs text-muted-foreground">
+      <div className="text-xs text-muted-foreground mt-0.5">
         billed as {bill.totalHours ?? 0} hr
         {bill.startTime
           ? ` · started ${new Date(bill.startTime).toLocaleTimeString()}`
           : ""}
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-        <div className="rounded-lg bg-secondary/50 p-2">
-          <div className="text-muted-foreground">Session</div>
-          <div className="font-semibold">
+      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg border border-border/60 bg-white p-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Session</div>
+          <div className="text-sm font-bold tabular-nums">
             {formatCurrency(sessionCharge.total)}
           </div>
         </div>
-        <div className="rounded-lg bg-secondary/50 p-2">
-          <div className="text-muted-foreground">Cafe</div>
-          <div className="font-semibold">
+        <div className="rounded-lg border border-border/60 bg-white p-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Cafe</div>
+          <div className="text-sm font-bold tabular-nums">
             {formatCurrency(foodCharge.total)}
           </div>
         </div>
-        <div
-          className="rounded-lg p-2"
-          style={{ background: "var(--gradient-primary)", color: "white" }}
-        >
-          <div className="opacity-80">Total</div>
-          <div className="font-semibold">{formatCurrency(total)}</div>
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-primary/80">Total</div>
+          <div className="text-sm font-bold tabular-nums text-primary">{formatCurrency(total)}</div>
         </div>
       </div>
-      <div className="mt-3 rounded-lg border border-border/60 bg-secondary/40 p-3 text-xs text-muted-foreground">
-        <div className="flex items-center justify-between">
-          <span>Total Session Amount</span>
-          <span className="font-semibold text-foreground">
-            {formatCurrency(sessionCharge.total)}
-          </span>
-        </div>
+      <div className="mt-3 rounded-lg border border-border/60 bg-secondary/40 p-3 text-xs space-y-0.5">
+        <Row k="Session Charges" v={formatCurrency(sessionCharge.subtotal)} />
         {sessionCharge.membershipApplied && (
-          <div className="mt-1 flex items-center justify-between">
-            <span>Membership</span>
-            <span className="font-semibold text-foreground">Applied</span>
-          </div>
+          <Row k="Membership" v="Applied" />
         )}
         {!sessionCharge.membershipApplied && sessionCharge.offer && (
-          <div className="mt-1 flex items-center justify-between">
-            <span>
-              Offer — {sessionCharge.offer.name} ({offerTypeLabel(sessionCharge.offer.type)})
-            </span>
-            <span className="font-semibold text-foreground">
-              {sessionCharge.discountAmount > 0 ? `-${formatCurrency(sessionCharge.discountAmount)}` : "Applied"}
-            </span>
-          </div>
+          <Row
+            k={`Offer Applied — ${sessionCharge.offer.name} (${offerTypeLabel(sessionCharge.offer.type)})`}
+            v="Applied"
+          />
         )}
+        {!sessionCharge.membershipApplied && sessionCharge.discountAmount > 0 && (
+          <Row k="Discount Amount" v={`-${formatCurrency(sessionCharge.discountAmount)}`} accent="oklch(0.62 0.17 155)" />
+        )}
+        <div className="border-t border-dashed border-border/60 my-1 pt-1">
+          <Row k="Final Session Charges" v={formatCurrency(sessionCharge.total)} bold />
+        </div>
         {socksCharge.socksQty > 0 && (
-          <div className="mt-1 flex items-center justify-between">
-            <span>
-              Socks ({socksCharge.socksQty} × {formatCurrency(pricingSettings?.socksCost ?? 0)})
-            </span>
-            <span className="font-semibold text-foreground">
-              {formatCurrency(socksCharge.socksTotal)}
-            </span>
-          </div>
+          <Row
+            k={`Socks (${socksCharge.socksQty} × ${formatCurrency(pricingSettings?.socksCost ?? 0)})`}
+            v={formatCurrency(socksCharge.socksTotal)}
+          />
         )}
-        <div className="mt-1 flex items-center justify-between">
-          <span>Amount Paid</span>
-          <span className="font-semibold text-foreground">
-            {formatCurrency(paymentSummary.amountPaid)}
-          </span>
+        <div className="border-t border-border/60 my-1 pt-1 space-y-0.5">
+          <Row k="Amount Paid" v={formatCurrency(paymentSummary.amountPaid)} />
+          <Row k="Pending Amount" v={formatCurrency(paymentSummary.pendingAmount)} />
+          <Row k="Payment Status" v={paymentSummary.paymentStatusLabel} />
         </div>
-        <div className="mt-1 flex items-center justify-between">
-          <span>Pending Amount</span>
-          <span className="font-semibold text-foreground">
-            {formatCurrency(paymentSummary.pendingAmount)}
-          </span>
-        </div>
-        <div className="mt-1 flex items-center justify-between">
-          <span>Payment Status</span>
-          <span className="font-semibold text-foreground">
-            {paymentSummary.paymentStatusLabel}
-          </span>
-        </div>
-        <div className="mt-2 text-[11px] text-muted-foreground">
+        <div className="mt-1.5 text-[11px] text-muted-foreground">
           18% GST Inclusive
         </div>
       </div>
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex gap-2.5">
         {bill.status === "booked" && (
           <Button
             size="sm"
             className="flex-1"
-            style={{ background: "var(--gradient-primary)" }}
+            style={{ background: "var(--primary)" }}
             onClick={onStart}
           >
             <Play className="h-3.5 w-3.5 mr-1" /> Start session
@@ -738,7 +716,7 @@ const BillCard = ({
             <Button
               size="sm"
               className="flex-1"
-              style={{ background: "var(--gradient-primary)" }}
+              style={{ background: "var(--primary)" }}
               onClick={onCheckout}
             >
               <Receipt className="h-3.5 w-3.5 mr-1" /> Checkout
@@ -812,56 +790,61 @@ const CheckoutDialog = ({
         <DialogHeader>
           <DialogTitle>Checkout · {bill.parentName}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3 text-sm">
-          <Row k="Session Total" v={formatCurrency(sessionCharge.total)} />
-          {sessionCharge.membershipApplied && (
-            <Row k="Membership" v="Applied" />
-          )}
-          {!sessionCharge.membershipApplied && sessionCharge.offer && (
-            <>
-              <Row k="Offer Name" v={sessionCharge.offer.name} />
-              <Row k="Offer Type" v={offerTypeLabel(sessionCharge.offer.type)} />
-              {sessionCharge.discountAmount > 0 && (
-                <Row k="Discount Amount" v={`-${formatCurrency(sessionCharge.discountAmount)}`} />
-              )}
-            </>
-          )}
-          {bill.children?.map((c, i) => (
-            <div key={i} className="text-xs text-muted-foreground pl-3">
-              ↳ {c.name} ({c.age}y):{" "}
-              {formatCurrency(
-                sessionCharge.total / Math.max(bill.children?.length || 1, 1),
-              )}
+        <div className="text-sm">
+          <div className="rounded-xl border border-border/60 bg-secondary/30 p-4 space-y-0.5">
+            <Row k="Session Charges" v={formatCurrency(sessionCharge.subtotal)} />
+            {sessionCharge.membershipApplied && (
+              <Row k="Membership" v="Applied" />
+            )}
+            {!sessionCharge.membershipApplied && sessionCharge.offer && (
+              <>
+                <Row
+                  k="Offer Applied"
+                  v={`${sessionCharge.offer.name} (${offerTypeLabel(sessionCharge.offer.type)})`}
+                />
+                {sessionCharge.discountAmount > 0 && (
+                  <Row k="Discount Amount" v={`-${formatCurrency(sessionCharge.discountAmount)}`} accent="oklch(0.62 0.17 155)" />
+                )}
+              </>
+            )}
+            <div className="border-t border-dashed border-border/60 my-1.5 pt-1">
+              <Row k="Final Session Charges" v={formatCurrency(sessionCharge.total)} bold />
             </div>
-          ))}
-          <Row k="Cafe items" v={formatCurrency(foodCharge.total)} />
-          {socksCharge.socksQty > 0 && (
-            <Row
-              k={`Socks (${socksCharge.socksQty} × ${formatCurrency(pricingSettings?.socksCost ?? 0)})`}
-              v={formatCurrency(socksCharge.socksTotal)}
-            />
-          )}
-          <div className="h-px bg-border" />
-          <div className="space-y-1.5">
+            {bill.children?.map((c, i) => (
+              <div key={i} className="text-xs text-muted-foreground pl-3">
+                ↳ {c.name} ({c.age}y):{" "}
+                {formatCurrency(
+                  sessionCharge.total / Math.max(bill.children?.length || 1, 1),
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-xl border border-border/60 bg-secondary/30 p-4 mt-3 space-y-0.5">
+            <Row k="Cafe items" v={formatCurrency(foodCharge.total)} />
+            {socksCharge.socksQty > 0 && (
+              <Row
+                k={`Socks (${socksCharge.socksQty} × ${formatCurrency(pricingSettings?.socksCost ?? 0)})`}
+                v={formatCurrency(socksCharge.socksTotal)}
+              />
+            )}
+          </div>
+
+          <div className="space-y-1.5 mt-3">
             <Label className="text-xs">Extra discount (₹)</Label>
             <Input type="text" value="--" disabled />
           </div>
-          <div className="h-px bg-border" />
-          <div className="space-y-2">
+
+          <div className="rounded-xl border border-border/60 bg-secondary/30 p-4 mt-3 space-y-0.5">
             <Row k="Amount Paid" v={formatCurrency(paymentSummary.amountPaid)} />
-            <Row
-              k="Pending Amount"
-              v={formatCurrency(paymentSummary.pendingAmount)}
-            />
-            <div className="text-xs text-muted-foreground">18% GST Inclusive</div>
-            <Row
-              k="Loyalty Points Earned"
-              v={loyaltyPoints.toString()}
-            />
+            <Row k="Pending Amount" v={formatCurrency(paymentSummary.pendingAmount)} />
+            <div className="text-xs text-muted-foreground py-0.5">18% GST Inclusive</div>
+            <Row k="Loyalty Points Earned" v={loyaltyPoints.toString()} />
           </div>
-          <div className="flex justify-between items-baseline pt-1">
-            <span className="text-muted-foreground">Final Amount</span>
-            <span className="text-3xl font-semibold gradient-text">
+
+          <div className="mt-4 flex justify-between items-center rounded-xl border-2 border-primary/30 bg-white px-4 py-3">
+            <span className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">Final Amount</span>
+            <span className="text-2xl font-bold text-primary tabular-nums">
               {formatCurrency(total)}
             </span>
           </div>
@@ -873,7 +856,7 @@ const CheckoutDialog = ({
           <Button
             onClick={confirm}
             disabled={submitting}
-            style={{ background: "var(--gradient-primary)" }}
+            style={{ background: "var(--primary)" }}
           >
             <CheckCircle2 className="h-4 w-4 mr-2" /> Confirm checkout
           </Button>
@@ -881,6 +864,58 @@ const CheckoutDialog = ({
       </DialogContent>
     </Dialog>
   );
+};
+
+// Everything under #invoice-print is styled with inline styles rather than
+// Tailwind classes or a shared stylesheet: the "Print invoice" flow below
+// clones this element's innerHTML into a bare popup window with no Tailwind
+// loaded, so any styling that isn't inline (or baked into that popup's own
+// <style> block) would silently disappear on the printed copy. Inline styles
+// are the only thing guaranteed to render identically on-screen and on paper.
+const INVOICE_TEXT = "#1f2937";
+const INVOICE_MUTED = "#6b7280";
+const INVOICE_BORDER = "#e5e7eb";
+const INVOICE_ACCENT = "#0f172a";
+
+const invoiceRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "baseline",
+  padding: "4px 0",
+  fontSize: 12.5,
+  color: INVOICE_TEXT,
+};
+
+const InvoiceRow = ({ label, value, bold, muted, color }) => (
+  <div
+    style={{
+      ...invoiceRowStyle,
+      fontWeight: bold ? 700 : 400,
+      color: color || (muted ? INVOICE_MUTED : INVOICE_TEXT),
+      fontSize: muted ? 11 : invoiceRowStyle.fontSize,
+    }}
+  >
+    <span>{label}</span>
+    <span>{value}</span>
+  </div>
+);
+
+const invoiceThStyle = {
+  padding: "7px 8px",
+  textAlign: "left",
+  fontSize: 10.5,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  color: "#475569",
+  background: "#f1f5f9",
+  borderBottom: `1px solid ${INVOICE_BORDER}`,
+};
+
+const invoiceTdStyle = {
+  padding: "7px 8px",
+  fontSize: 12,
+  color: INVOICE_TEXT,
+  borderBottom: `1px solid ${INVOICE_BORDER}`,
 };
 
 const InvoiceDialog = ({ invoice, onClose }) => {
@@ -891,10 +926,12 @@ const InvoiceDialog = ({ invoice, onClose }) => {
     if (!w) return;
     const html = document.getElementById("invoice-print")?.innerHTML ?? "";
     w.document.write(`<html><head><title>Invoice ${invoice.invoice_no}</title>
-      <style>body{font-family:system-ui;padding:32px;color:#000;max-width:680px;margin:auto}
-      h1{margin:0 0 4px} table{width:100%;border-collapse:collapse;margin:12px 0}
-      td,th{padding:6px 8px;border-bottom:1px solid #eee;text-align:left;font-size:13px}
-      .row{display:flex;justify-content:space-between;padding:3px 0}.bold{font-weight:700}
+      <style>
+      *{box-sizing:border-box}
+      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:32px;color:#111827;max-width:680px;margin:auto;line-height:1.4}
+      h1{margin:0}
+      table{width:100%;border-collapse:collapse;margin:14px 0}
+      @media print { body{padding:0} }
       </style></head><body>${html}</body></html>`);
     w.document.close();
     w.focus();
@@ -922,196 +959,222 @@ const InvoiceDialog = ({ invoice, onClose }) => {
         <DialogHeader>
           <DialogTitle>Invoice {invoice.invoice_no}</DialogTitle>
         </DialogHeader>
-        <div id="invoice-print">
+        <div id="invoice-print" style={{ color: INVOICE_TEXT, fontFamily: "inherit" }}>
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "flex-start",
+              paddingBottom: 14,
+              borderBottom: `2px solid ${INVOICE_ACCENT}`,
             }}
           >
             <div>
-              <h1 style={{ fontSize: 22 }}>PLAYKIT</h1>
-              <div style={{ fontSize: 12, color: "#666" }}>Tax invoice</div>
+              <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, margin: 0, color: INVOICE_ACCENT }}>
+                PLAYKIT
+              </h1>
+              <div style={{ fontSize: 10.5, letterSpacing: 1, textTransform: "uppercase", color: INVOICE_MUTED, marginTop: 2 }}>
+                Tax Invoice
+              </div>
             </div>
-            <div style={{ textAlign: "right", fontSize: 12 }}>
-              <div className="bold">{invoice.invoice_no}</div>
-              <div>
-                {invoice.closed_at
-                  ? new Date(invoice.closed_at).toLocaleString()
-                  : ""}
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5, fontFamily: "monospace" }}>{invoice.invoice_no}</div>
+              <div style={{ fontSize: 11, color: INVOICE_MUTED, marginTop: 2 }}>
+                {invoice.closed_at ? new Date(invoice.closed_at).toLocaleString() : ""}
               </div>
             </div>
           </div>
-          <div style={{ marginTop: 16, fontSize: 13 }}>
+
+          <div
+            style={{
+              marginTop: 14,
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              rowGap: 6,
+              columnGap: 16,
+              fontSize: 12.5,
+            }}
+          >
+            <div><span style={{ color: INVOICE_MUTED }}>Parent</span><br />{customer.parentName || invoice.parentName} · {customer.mobileNumber || invoice.mobileNumber}</div>
+            <div><span style={{ color: INVOICE_MUTED }}>Band</span><br />{customer.bandNumber || invoice.bandNumber || "—"}</div>
+            <div><span style={{ color: INVOICE_MUTED }}>Session</span><br />{customer.sessionNumber || invoice.sessionNumber || "—"}</div>
+            {customer.city && <div><span style={{ color: INVOICE_MUTED }}>City</span><br />{customer.city}</div>}
             <div>
-              <b>Parent:</b> {customer.parentName || invoice.parentName} · {customer.mobileNumber || invoice.mobileNumber}
-            </div>
-            <div>
-              <b>Band:</b> {customer.bandNumber || invoice.bandNumber || "—"}
-            </div>
-            <div>
-              <b>Session:</b> {customer.sessionNumber || invoice.sessionNumber || "—"}
-            </div>
-            {customer.city && (
-              <div>
-                <b>City:</b> {customer.city}
-              </div>
-            )}
-            <div>
-              <b>Payment:</b>{" "}
-              {payment.status === "paid"
-                ? "Paid"
-                : payment.status === "partially_paid"
-                  ? "Partially paid"
-                  : "Pending"}
+              <span style={{ color: INVOICE_MUTED }}>Payment</span><br />
+              {payment.status === "paid" ? "Paid" : payment.status === "partially_paid" ? "Partially paid" : "Pending"}
             </div>
           </div>
 
           <table>
             <thead>
               <tr>
-                <th>Child</th>
-                <th>DOB</th>
-                <th>Age</th>
-                <th>First Hour</th>
-                <th>Extension</th>
-                <th>Socks</th>
-                <th style={{ textAlign: "right" }}>Total</th>
+                <th style={invoiceThStyle}>Child</th>
+                <th style={invoiceThStyle}>DOB</th>
+                <th style={invoiceThStyle}>Age</th>
+                <th style={invoiceThStyle}>First Hour</th>
+                <th style={invoiceThStyle}>Extension</th>
+                <th style={invoiceThStyle}>Socks</th>
+                <th style={{ ...invoiceThStyle, textAlign: "right" }}>Total</th>
               </tr>
             </thead>
             <tbody>
               {ch.map((c, i) => (
                 <tr key={i}>
-                  <td>{c.name}</td>
-                  <td>{c.dob ? new Date(c.dob).toLocaleDateString() : "—"}</td>
-                  <td>{c.age}y</td>
-                  <td>{formatCurrency(c.firstHourCharge || 0)}</td>
-                  <td>{c.extensionHours ? `${c.extensionHours}h × ${formatCurrency(c.extensionRate || 0)}` : "—"}</td>
-                  <td>{c.socksOpted ? "Yes" : "—"}</td>
-                  <td style={{ textAlign: "right" }}>{formatCurrency(c.childTotal || 0)}</td>
+                  <td style={invoiceTdStyle}>{c.name}</td>
+                  <td style={invoiceTdStyle}>{c.dob ? new Date(c.dob).toLocaleDateString() : "—"}</td>
+                  <td style={invoiceTdStyle}>{c.age}y</td>
+                  <td style={invoiceTdStyle}>{formatCurrency(c.firstHourCharge || 0)}</td>
+                  <td style={invoiceTdStyle}>{c.extensionHours ? `${c.extensionHours}h × ${formatCurrency(c.extensionRate || 0)}` : "—"}</td>
+                  <td style={invoiceTdStyle}>{c.socksOpted ? "Yes" : "—"}</td>
+                  <td style={{ ...invoiceTdStyle, textAlign: "right", fontWeight: 600 }}>{formatCurrency(c.childTotal || 0)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
 
-          <div style={{ fontSize: 13, marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: INVOICE_MUTED, marginTop: -4, marginBottom: 8 }}>
             <div>
-              <b>Session:</b> {start?.toLocaleString()} →{" "}
-              {end?.toLocaleString()} ({durMin} min billed)
+              <span style={{ color: INVOICE_TEXT, fontWeight: 600 }}>Session:</span>{" "}
+              {start?.toLocaleString()} → {end?.toLocaleString()} ({durMin} min billed)
             </div>
-            <div>
-              <b>Hours:</b> {sessionDetails?.totalHours || 1} total · {sessionDetails?.extensionHours || 0} extension · {sessionDetails?.pauseTimeMinutes || 0} min pause
+            <div style={{ marginTop: 2 }}>
+              <span style={{ color: INVOICE_TEXT, fontWeight: 600 }}>Hours:</span>{" "}
+              {sessionDetails?.totalHours || 1} total · {sessionDetails?.extensionHours || 0} extension · {sessionDetails?.pauseTimeMinutes || 0} min pause
             </div>
           </div>
 
           <table>
             <thead>
               <tr>
-                <th>Description</th>
-                <th>Qty</th>
-                <th style={{ textAlign: "right" }}>Amount</th>
+                <th style={invoiceThStyle}>Description</th>
+                <th style={invoiceThStyle}>Qty</th>
+                <th style={{ ...invoiceThStyle, textAlign: "right" }}>Amount</th>
               </tr>
             </thead>
             <tbody>
-              {invoice.membership?.applied && <tr><td>Membership applied · {invoice.membership.planName}</td><td>—</td><td style={{ textAlign: "right" }}>Session covered</td></tr>}
-              {invoice.membership?.purchase?.price > 0 && <tr><td>Membership purchase · {invoice.membership.purchase.planName}</td><td>1</td><td style={{ textAlign: "right" }}>{formatCurrency(invoice.membership.purchase.price)}</td></tr>}
+              {invoice.membership?.applied && (
+                <tr>
+                  <td style={invoiceTdStyle}>Membership applied · {invoice.membership.planName}</td>
+                  <td style={invoiceTdStyle}>—</td>
+                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>Session covered</td>
+                </tr>
+              )}
+              {invoice.membership?.purchase?.price > 0 && (
+                <tr>
+                  <td style={invoiceTdStyle}>Membership purchase · {invoice.membership.purchase.planName}</td>
+                  <td style={invoiceTdStyle}>1</td>
+                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(invoice.membership.purchase.price)}</td>
+                </tr>
+              )}
               <tr>
-                <td>Session charges ({ch.length} child)</td>
-                <td>—</td>
-                <td style={{ textAlign: "right" }}>
-                  {formatCurrency(charges?.sessionTotal || 0)}
+                <td style={invoiceTdStyle}>Session charges ({ch.length} child)</td>
+                <td style={invoiceTdStyle}>—</td>
+                <td style={{ ...invoiceTdStyle, textAlign: "right" }}>
+                  {formatCurrency(charges?.normalSessionTotal ?? charges?.sessionTotal ?? 0)}
                 </td>
               </tr>
+              {!invoice.membership?.applied && invoice.offer?.name && charges?.discountAmount > 0 && (
+                <tr>
+                  <td style={invoiceTdStyle}>Discount — {invoice.offer.name} ({offerTypeLabel(invoice.offer.type)})</td>
+                  <td style={invoiceTdStyle}>—</td>
+                  <td style={{ ...invoiceTdStyle, textAlign: "right", color: "#059669" }}>
+                    -{formatCurrency(charges.discountAmount)}
+                  </td>
+                </tr>
+              )}
               {cafeItems.map((item, index) => (
                 <tr key={`${item.name}-${index}`}>
-                  <td>{item.name}</td>
-                  <td>{item.quantity}</td>
-                  <td style={{ textAlign: "right" }}>{formatCurrency(item.lineTotal || 0)}</td>
+                  <td style={invoiceTdStyle}>{item.name}</td>
+                  <td style={invoiceTdStyle}>{item.quantity}</td>
+                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(item.lineTotal || 0)}</td>
                 </tr>
               ))}
               {charges?.socksQty > 0 && (
                 <tr>
-                  <td>Socks</td>
-                  <td>{charges.socksQty}</td>
-                  <td style={{ textAlign: "right" }}>{formatCurrency(charges.socksTotal || 0)}</td>
+                  <td style={invoiceTdStyle}>Socks</td>
+                  <td style={invoiceTdStyle}>{charges.socksQty}</td>
+                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(charges.socksTotal || 0)}</td>
                 </tr>
               )}
             </tbody>
           </table>
 
-          <div
-            style={{
-              marginTop: 12,
-              paddingTop: 12,
-              borderTop: "1px solid #ddd",
-            }}
-          >
-            <div className="row">
-              <span>Session Total</span>
-              <span>{formatCurrency(charges?.sessionTotal || 0)}</span>
-            </div>
-            {invoice.membership?.applied && <div className="row"><span>Membership Applied ({invoice.membership.hoursConsumed}h)</span><span>Session charge ₹0</span></div>}
-            {invoice.membership?.applied && <>
-              <div className="row"><span>Membership Name</span><span>{invoice.membership.planName}</span></div>
-              <div className="row"><span>Membership Hours Before Session</span><span>{invoice.membership.hoursBeforeSession}h</span></div>
-              <div className="row"><span>Hours Used In This Session</span><span>{invoice.membership.hoursConsumed}h</span></div>
-              <div className="row"><span>Remaining Membership Hours</span><span>{invoice.membership.remainingHours}h</span></div>
-              <div className="row"><span>Membership Expiry Date</span><span>{invoice.membership.expiryDate ? new Date(invoice.membership.expiryDate).toLocaleDateString() : "—"}</span></div>
-            </>}
-            {!invoice.membership?.applied && invoice.offer?.name && (
+          <div style={{ marginTop: 8, paddingTop: 4 }}>
+            <InvoiceRow label="Session Charges" value={formatCurrency(charges?.normalSessionTotal ?? charges?.sessionTotal ?? 0)} />
+            {invoice.membership?.applied && (
               <>
-                <div className="row"><span>Offer Name</span><span>{invoice.offer.name}</span></div>
-                <div className="row"><span>Offer Type</span><span>{offerTypeLabel(invoice.offer.type)}</span></div>
+                <InvoiceRow label={`Membership Applied (${invoice.membership.hoursConsumed}h)`} value="Session charge ₹0" />
+                <InvoiceRow label="Membership Name" value={invoice.membership.planName} muted />
+                <InvoiceRow label="Membership Hours Before Session" value={`${invoice.membership.hoursBeforeSession}h`} muted />
+                <InvoiceRow label="Hours Used In This Session" value={`${invoice.membership.hoursConsumed}h`} muted />
+                <InvoiceRow label="Remaining Membership Hours" value={`${invoice.membership.remainingHours}h`} muted />
+                <InvoiceRow
+                  label="Membership Expiry Date"
+                  value={invoice.membership.expiryDate ? new Date(invoice.membership.expiryDate).toLocaleDateString() : "—"}
+                  muted
+                />
               </>
             )}
-            {charges?.discountAmount > 0 && <div className="row"><span>Discount Amount</span><span>-{formatCurrency(charges.discountAmount)}</span></div>}
-            {charges?.membershipPurchaseTotal > 0 && <div className="row"><span>Membership Purchase</span><span>{formatCurrency(charges.membershipPurchaseTotal)}</span></div>}
-            <div className="row">
-              <span>Cafe Subtotal</span>
-              <span>{formatCurrency(charges?.cafeSubtotal ?? charges?.cafeTotal ?? 0)}</span>
-            </div>
-            <div className="row">
-              <span>Cafe GST (5%)</span>
-              <span>{formatCurrency(charges?.cafeGST || 0)}</span>
-            </div>
-            <div className="row">
-              <span>Cafe Total</span>
-              <span>{formatCurrency(charges?.cafeTotal || 0)}</span>
-            </div>
-            {charges?.socksQty > 0 && (
-              <div className="row">
-                <span>Socks ({charges.socksQty} × {formatCurrency(charges.socksRate || 0)})</span>
-                <span>{formatCurrency(charges.socksTotal || 0)}</span>
+            {!invoice.membership?.applied && invoice.offer?.name && (
+              <InvoiceRow label="Offer Applied" value={`${invoice.offer.name} (${offerTypeLabel(invoice.offer.type)})`} />
+            )}
+            {!invoice.membership?.applied && charges?.discountAmount > 0 && (
+              <InvoiceRow label="Discount Amount" value={`-${formatCurrency(charges.discountAmount)}`} color="#059669" />
+            )}
+            {!invoice.membership?.applied && (
+              <div style={{ borderTop: `1px dashed ${INVOICE_BORDER}`, marginTop: 2, paddingTop: 4 }}>
+                <InvoiceRow label="Final Session Charges" value={formatCurrency(charges?.sessionTotal || 0)} bold />
               </div>
             )}
-            <div className="row">
-              <span>Amount Paid</span>
-              <span>{formatCurrency(paymentSummary.amountPaid)}</span>
+            {charges?.membershipPurchaseTotal > 0 && (
+              <InvoiceRow label="Membership Purchase" value={formatCurrency(charges.membershipPurchaseTotal)} />
+            )}
+
+            <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 8, paddingTop: 6 }}>
+              <InvoiceRow label="Cafe Subtotal" value={formatCurrency(charges?.cafeSubtotal ?? charges?.cafeTotal ?? 0)} />
+              <InvoiceRow label="Cafe GST (5%)" value={formatCurrency(charges?.cafeGST || 0)} muted />
+              <InvoiceRow label="Cafe Total" value={formatCurrency(charges?.cafeTotal || 0)} />
+              {charges?.socksQty > 0 && (
+                <InvoiceRow
+                  label={`Socks (${charges.socksQty} × ${formatCurrency(charges.socksRate || 0)})`}
+                  value={formatCurrency(charges.socksTotal || 0)}
+                />
+              )}
             </div>
-            <div className="row">
-              <span>Pending Amount</span>
-              <span>{formatCurrency(paymentSummary.pendingAmount)}</span>
+
+            <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 8, paddingTop: 6 }}>
+              <InvoiceRow label="Amount Paid" value={formatCurrency(paymentSummary.amountPaid)} />
+              <InvoiceRow label="Pending Amount" value={formatCurrency(paymentSummary.pendingAmount)} />
+              <InvoiceRow label="18% GST Inclusive" value="—" muted />
+              <InvoiceRow label="Loyalty Points Earned" value={loyaltyPoints} />
             </div>
-            <div className="row" style={{ color: "#666", fontSize: 12 }}>
-              <span>18% GST Inclusive</span>
-              <span>—</span>
-            </div>
-            <div className="row">
-              <span>Loyalty Points Earned</span>
-              <span>{loyaltyPoints}</span>
-            </div>
-            <div className="row bold" style={{ fontSize: 18, marginTop: 6 }}>
-              <span>FINAL AMOUNT (GRAND TOTAL)</span>
-              <span>{formatCurrency(charges?.grandTotal || 0)}</span>
+
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                background: INVOICE_ACCENT,
+                color: "#ffffff",
+                borderRadius: 8,
+                padding: "12px 16px",
+              }}
+            >
+              <span style={{ fontSize: 12.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+                Grand Total
+              </span>
+              <span style={{ fontSize: 20, fontWeight: 800 }}>{formatCurrency(charges?.grandTotal || 0)}</span>
             </div>
           </div>
+
           <div
             style={{
               textAlign: "center",
-              marginTop: 20,
-              fontSize: 12,
-              color: "#666",
+              marginTop: 18,
+              fontSize: 11.5,
+              fontStyle: "italic",
+              color: INVOICE_MUTED,
             }}
           >
             Thank you for visiting!
@@ -1123,7 +1186,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
           </Button>
           <Button
             onClick={print}
-            style={{ background: "var(--gradient-primary)" }}
+            style={{ background: "var(--primary)" }}
           >
             <Printer className="h-4 w-4 mr-2" /> Print invoice
           </Button>
@@ -1138,6 +1201,7 @@ function SessionsPage() {
   const [checkoutBillId, setCheckoutBillId] = useState(null);
   const [finalInvoice, setFinalInvoice] = useState(null);
   const [bills, setBills] = useState([]);
+  const [recentlyClosed, setRecentlyClosed] = useState([]);
   const [pricingSettings, setPricingSettings] = useState(null);
   const [kotsBySession, setKotsBySession] = useState({});
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1194,6 +1258,24 @@ function SessionsPage() {
     }
   }, []);
 
+  // Always the true latest 5 checked-out sessions from the server — not
+  // just whatever got completed during this browser tab's lifetime.
+  const loadRecentlyClosed = useCallback(async () => {
+    try {
+      const response = await axios.get(
+        `${import.meta.env.VITE_API_URL}/session/completed/recent?limit=5`,
+        { withCredentials: true },
+      );
+      setRecentlyClosed(response.data?.sessions ?? []);
+    } catch {
+      console.warn("Unable to load recently closed sessions");
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRecentlyClosed();
+  }, [loadRecentlyClosed]);
+
   useEffect(() => {
     const loadPricingSettings = async () => {
       try {
@@ -1235,7 +1317,7 @@ function SessionsPage() {
   const running = bills.filter(
     (b) => b.status === "running" || b.status === "paused",
   );
-  const completed = bills.filter((b) => b.status === "completed").slice(0, 20);
+  const completed = recentlyClosed;
 
   const pause = async (b) => {
     try {
@@ -1368,26 +1450,22 @@ function SessionsPage() {
     });
     setCheckoutBillId(null);
     setFinalInvoice(finalizedInvoice);
+    loadRecentlyClosed();
   };
 
   return (
     <div className="space-y-6 px-6 py-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">Running Bills</h1>
-          <p className="text-muted-foreground mt-1">
-            Live unified bills — sessions, cafe and offers accrue together.
-          </p>
-        </div>
-        <Button style={{ background: "var(--gradient-primary)" }}>
-          <PlayCircle className="h-4 w-4 mr-2" /> Start session
-        </Button>
+      <div>
+        <h1 className="text-3xl font-semibold">Running Bills</h1>
+        <p className="text-muted-foreground mt-1">
+          Live unified bills — sessions, cafe and offers accrue together.
+        </p>
       </div>
 
       <section>
         <div className="flex items-center gap-2 mb-4">
           <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-          <h2 className="font-semibold">
+          <h2 className="text-lg font-bold tracking-tight">
             Booked sessions{" "}
             <span className="text-muted-foreground font-normal">
               ({booked.length})
@@ -1423,7 +1501,7 @@ function SessionsPage() {
       <section>
         <div className="flex items-center gap-2 mb-4">
           <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-          <h2 className="font-semibold">
+          <h2 className="text-lg font-bold tracking-tight">
             Running sessions{" "}
             <span className="text-muted-foreground font-normal">
               ({running.length})

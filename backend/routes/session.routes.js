@@ -7,6 +7,7 @@ router.get("/billing/search",authmiddleware.isloggedin,authmiddleware.isdesk,ses
 router.post('/create',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.createsession)
 router.get('/booked',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.bookedsession)
 router.get('/running/',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.runningsession)
+router.get('/completed/recent',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.recentCompletedSessions)
 router.patch('/start/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.startsession)
 router.patch('/pause/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.pausesession)
 router.patch('/extend/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.extendsession)

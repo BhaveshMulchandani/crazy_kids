@@ -9,6 +9,8 @@ import {
   Coffee,
   Timer,
   AlertTriangle,
+  Tag,
+  Percent,
 } from "lucide-react";
 import {
   LineChart,
@@ -203,6 +205,42 @@ export default function Dashboard() {
           accent="oklch(0.78 0.17 75)"
         />
       </div>
+
+      {stats.offerAnalytics && (
+        <div className="grid grid-cols-4 gap-5">
+          <StatCard
+            label="Most Used Offer"
+            value={stats.offerAnalytics.mostUsedOffer || "—"}
+            hint={
+              stats.offerAnalytics.mostUsedOffer
+                ? `${stats.offerAnalytics.mostUsedOfferCount} times used`
+                : "No offers used yet"
+            }
+            icon={Tag}
+            accent="oklch(0.58 0.21 260)"
+          />
+          <StatCard
+            label="Offer Usage Count"
+            value={stats.offerAnalytics.usageCount}
+            hint="Invoices with an offer applied"
+            icon={Percent}
+            accent="oklch(0.65 0.18 145)"
+          />
+          <StatCard
+            label="Total Discount Given"
+            value={`₹${Number(stats.offerAnalytics.totalDiscountGiven).toLocaleString()}`}
+            icon={IndianRupee}
+            accent="oklch(0.62 0.23 25)"
+          />
+          <StatCard
+            label="Revenue Saved by Offers"
+            value={`₹${Number(stats.offerAnalytics.revenueSaved).toLocaleString()}`}
+            hint="Passed on to customers"
+            icon={TrendingUp}
+            accent="oklch(0.78 0.17 75)"
+          />
+        </div>
+      )}
 
       {activeSessions.length > 0 && (
         <div className="surface-card p-5">

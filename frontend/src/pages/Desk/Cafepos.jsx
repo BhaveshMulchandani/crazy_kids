@@ -190,7 +190,7 @@ function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Close</Button>
-          <Button onClick={print} style={{ background: "var(--gradient-primary)" }}>
+          <Button onClick={print} style={{ background: "var(--primary)" }}>
             <Printer className="h-4 w-4" /> Print KOT
           </Button>
         </DialogFooter>
@@ -441,7 +441,7 @@ function Cafepos() {
                   onClick={() => add(item)}
                   className="text-left surface-card p-3 hover:-translate-y-0.5 hover:shadow-lg transition-all border-2 border-transparent hover:border-primary/40"
                 >
-                  <div className="aspect-square rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 grid place-items-center mb-2 text-3xl">
+                  <div className="aspect-square rounded-xl bg-secondary/50 grid place-items-center mb-2 text-3xl">
                     {item.image_url ? <img src={item.image_url} alt={item.name} className="w-full h-full object-cover rounded-xl" /> : toEmoji(item.category)}
                   </div>
                   <div className="font-semibold text-sm leading-tight">{item.name}</div>
@@ -562,14 +562,14 @@ function Cafepos() {
             </div>
             <div className="mt-4 pt-3 border-t flex items-baseline justify-between">
               <span className="text-sm text-muted-foreground">Total</span>
-              <span className="text-2xl font-semibold gradient-text">₹{total.toLocaleString()}</span>
+              <span className="text-2xl font-bold text-primary">₹{total.toLocaleString()}</span>
             </div>
             <Button
               type="button"
               onClick={submit}
               disabled={submitting || cart.length === 0 || !customer}
               className="w-full mt-3 h-11"
-              style={{ background: "var(--gradient-primary)" }}
+              style={{ background: "var(--primary)" }}
             >
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Place order

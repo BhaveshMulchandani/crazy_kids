@@ -577,25 +577,41 @@ function Offers() {
         {offers.map((offer) => {
           const Icon = iconByType[offer.type] || BadgeIndianRupee;
           return (
-            <div key={offer.id} className="surface-card p-6 hover-lift relative overflow-hidden rounded-3xl border border-border bg-background shadow-sm">
+            <div
+              key={offer.id}
+              className={cn(
+                "relative overflow-hidden rounded-3xl border p-6 shadow-sm transition-colors",
+                offer.active
+                  ? "hover-lift"
+                  : "border-border bg-muted/40 grayscale-[35%] opacity-75",
+              )}
+            >
+              {offer.active && (
+                <div className="absolute inset-x-0 top-0 h-1" />
+              )}
               <div className="flex items-start justify-between gap-4">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-white">
+                <div
+                  className={cn(
+                    "flex h-11 w-11 items-center justify-center rounded-xl text-white shadow-sm",
+                    offer.active ? "bg-emerald-600" : "bg-muted-foreground/50",
+                  )}
+                >
                   <Icon className="h-5 w-5" />
                 </div>
                 <Switch checked={offer.active} onCheckedChange={() => toggleActive(offer.id)} />
               </div>
-              <div className="mt-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{typeLabel[offer.type]}</div>
-                <div className="font-semibold text-lg mt-1">{offer.name}</div>
-                {offer.description && <p className="text-sm text-muted-foreground mt-2">{offer.description}</p>}
+              <div className="mt-5">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{typeLabel[offer.type]}</div>
+                <div className="font-semibold text-xl mt-1.5 tracking-tight text-foreground">{offer.name}</div>
+                {offer.description && <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{offer.description}</p>}
                 {offer.type === "membership" && (
                   <div className="mt-5 space-y-3 text-foreground">
-                    <div className="text-3xl font-semibold">₹{offer.value}</div>
-                    <div className="text-sm">Kids Allowed: {offer.rules.kidsAllowed}</div>
-                    <div className="text-sm">Play Hours: {offer.rules.playHours}</div>
-                    <div className="text-sm">Validity: {offer.rules.validityMonths} months</div>
+                    <div className="text-3xl font-semibold tracking-tight">₹{offer.value}</div>
+                    <div className="text-sm text-muted-foreground">Kids Allowed: <span className="font-medium text-foreground">{offer.rules.kidsAllowed}</span></div>
+                    <div className="text-sm text-muted-foreground">Play Hours: <span className="font-medium text-foreground">{offer.rules.playHours}</span></div>
+                    <div className="text-sm text-muted-foreground">Validity: <span className="font-medium text-foreground">{offer.rules.validityMonths} months</span></div>
                     {offer.rules.benefits?.length > 0 && (
-                      <div className="space-y-1 rounded-xl bg-muted/10 p-3 text-sm">
+                      <div className="space-y-1 rounded-xl bg-background/60 p-3 text-sm">
                         <div className="font-medium">Benefits</div>
                         <ul className="list-disc pl-5">
                           {offer.rules.benefits.map((benefit, index) => (
@@ -608,33 +624,41 @@ function Offers() {
                 )}
                 {offer.type === "discount" && (
                   <div className="mt-5 space-y-2 text-foreground">
-                    <div className="text-3xl font-semibold">{offer.value}% off</div>
-                    <div className="text-sm">Minimum Kids: {offer.rules.minKids}</div>
+                    <div className="text-3xl font-semibold tracking-tight">{offer.value}% off</div>
+                    <div className="text-sm text-muted-foreground">Minimum Kids: <span className="font-medium text-foreground">{offer.rules.minKids}</span></div>
                   </div>
                 )}
                 {offer.type === "flat_discount" && (
                   <div className="mt-5 space-y-2 text-foreground">
-                    <div className="text-3xl font-semibold">₹{offer.value} off</div>
-                    <div className="text-sm">Minimum Kids: {offer.rules.minKids}</div>
+                    <div className="text-3xl font-semibold tracking-tight">₹{offer.value} off</div>
+                    <div className="text-sm text-muted-foreground">Minimum Kids: <span className="font-medium text-foreground">{offer.rules.minKids}</span></div>
                   </div>
                 )}
                 {offer.type === "special_pricing" && (
                   <div className="mt-5 space-y-2 text-foreground">
-                    <div className="text-3xl font-semibold">{offer.rules.day}</div>
-                    <div className="text-sm">First Hour: ₹{offer.rules.firstHourPrice}</div>
-                    <div className="text-sm">Additional Hour: ₹{offer.rules.nextHourPrice}</div>
+                    <div className="text-3xl font-semibold tracking-tight">{offer.rules.day}</div>
+                    <div className="text-sm text-muted-foreground">First Hour: <span className="font-medium text-foreground">₹{offer.rules.firstHourPrice}</span></div>
+                    <div className="text-sm text-muted-foreground">Additional Hour: <span className="font-medium text-foreground">₹{offer.rules.nextHourPrice}</span></div>
                   </div>
                 )}
               </div>
-              <div className="mt-5 flex items-center justify-between">
+              <div className="mt-6 flex items-center justify-between border-t border-border/60 pt-4">
                 <span className={cn(
-                  "text-xs rounded-full px-2 py-1",
-                  offer.active ? "bg-success/10 text-success" : "bg-muted text-muted-foreground",
+                  "inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1",
+                  offer.active
+                    ? "bg-white text-emerald-700"
+                    : "bg-muted text-muted-foreground",
                 )}
                 >
+                  <span className={cn("h-1.5 w-1.5 rounded-full", offer.active ? "bg-emerald-500" : "bg-muted-foreground/60")} />
                   {offer.active ? "Active" : "Inactive"}
                 </span>
-                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => removeOffer(offer.id)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40"
+                  onClick={() => removeOffer(offer.id)}
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>

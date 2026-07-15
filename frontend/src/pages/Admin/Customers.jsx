@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Award, Search, Users as UsersIcon } from "lucide-react";
+import { Award, ChevronLeft, ChevronRight, Search, Users as UsersIcon } from "lucide-react";
 import axios from "axios";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
@@ -19,50 +19,58 @@ const Input = React.forwardRef(
 );
 Input.displayName = "Input";
 
+const PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 350;
+
 function CustomersPage() {
   const API_BASE = import.meta.env.VITE_API_URL;
   const [q, setQ] = React.useState("");
+  const [search, setSearch] = React.useState("");
   const [customers, setCustomers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [page, setPage] = React.useState(1);
+  const [total, setTotal] = React.useState(0);
 
-  const fetchCustomers = async () => {
-    try {
-      setLoading(true);
-
-      const res = await axios.get(`${API_BASE}/admin/customers`, {
-        withCredentials: true,
-      });
-
-      setCustomers(res.data.customers);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Debounce the search box so pagination + search don't fire a request per
+  // keystroke — only the settled query reaches the server. A new search
+  // always starts back at page 1.
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(q.trim());
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [q]);
 
   React.useEffect(() => {
+    let cancelled = false;
+
+    const fetchCustomers = async () => {
+      try {
+        setLoading(true);
+
+        const res = await axios.get(`${API_BASE}/admin/customers`, {
+          params: { page, limit: PAGE_SIZE, search: search || undefined },
+          withCredentials: true,
+        });
+
+        if (cancelled) return;
+        setCustomers(res.data.customers || []);
+        setTotal(res.data.total ?? res.data.count ?? 0);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
     fetchCustomers();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE, page, search]);
 
-  const filtered = React.useMemo(() => {
-  const query = q.trim().toLowerCase();
-
-  if (!query) return customers;
-
-  return customers.filter((customer) => {
-    const childNames = customer.children
-      ?.map((child) => child.name.toLowerCase())
-      .join(" ") || "";
-
-    return (
-      childNames.includes(query) ||
-      customer.parentName?.toLowerCase().includes(query) ||
-      customer.mobileNumber?.includes(query) ||
-      customer.sessionNumber?.toLowerCase().includes(query)
-    );
-  });
-}, [q, customers]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-6 px-6 py-8">
@@ -70,7 +78,7 @@ function CustomersPage() {
         <div>
           <h1 className="text-3xl font-semibold">Customers</h1>
           <p className="text-muted-foreground mt-1">
-            {customers.length} registered users
+            {total} registered {total === 1 ? "user" : "users"}
           </p>
         </div>
 
@@ -100,18 +108,20 @@ function CustomersPage() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {customers.length === 0 ? (
               <tr>
                 <td
                   colSpan={8}
                   className="text-center py-12 text-muted-foreground"
                 >
                   <UsersIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  No customers yet. Generate a bill to create one.
+                  {loading
+                    ? "Loading customers…"
+                    : "No customers yet. Generate a bill to create one."}
                 </td>
               </tr>
             ) : (
-              filtered.map((customer) => (
+              customers.map((customer) => (
                 <tr
                   key={customer.id}
                   className="border-t border-border hover:bg-secondary/40 transition"
@@ -146,6 +156,32 @@ function CustomersPage() {
           </tbody>
         </table>
       </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between px-1">
+          <div className="text-xs text-muted-foreground">
+            Page {page} of {totalPages} · {total} total
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" /> Previous
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

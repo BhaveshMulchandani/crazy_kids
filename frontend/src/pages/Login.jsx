@@ -112,6 +112,9 @@ export default function Login() {
               <input
                 id="email"
                 type="email"
+                name="email"
+                autoComplete="email"
+                autoFocus
                 required
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -132,6 +135,8 @@ export default function Login() {
               <input
                 id="password"
                 type="password"
+                name="password"
+                autoComplete="current-password"
                 required
                 minLength={6}
                 value={password}
