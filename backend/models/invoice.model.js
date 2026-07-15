@@ -64,6 +64,7 @@ const invoiceSchema = new mongoose.Schema(
       loyaltyPoints: { type: Number, default: 0 },
       normalSessionTotal: { type: Number, default: 0 },
       discountAmount: { type: Number, default: 0 },
+      extraDiscountAmount: { type: Number, default: 0 },
       membershipPurchaseTotal: { type: Number, default: 0 },
       socksQty: { type: Number, default: 0 },
       socksRate: { type: Number, default: 0 },

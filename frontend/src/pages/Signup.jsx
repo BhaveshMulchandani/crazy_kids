@@ -4,24 +4,61 @@ import { Link } from "react-router-dom";
 import axios from "axios"
 import { useNavigate } from "react-router-dom";
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
   const navigate = useNavigate()
 
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    const response = await axios.post(`${import.meta.env.VITE_API_URL}/users/register`,{email,password})
+    const nextErrors = {};
+    const trimmedEmail = email.trim();
 
-    if(response.status === 201){
-      navigate("/")
+    if (!trimmedEmail) {
+      nextErrors.email = "This field is required";
+    } else if (!EMAIL_PATTERN.test(trimmedEmail)) {
+      nextErrors.email = "Please enter a valid email address";
     }
 
-    setEmail("")
-    setPassword("")
+    if (!password) {
+      nextErrors.password = "This field is required";
+    } else if (password.length < 6) {
+      nextErrors.password = "Password must be at least 6 characters";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
+    setErrors({});
+    setSubmitting(true);
+
+    try {
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/users/register`,
+        { email: trimmedEmail, password },
+      );
+
+      if (response.status === 201) {
+        navigate("/");
+      }
+
+      setEmail("");
+      setPassword("");
+    } catch (error) {
+      setErrors({
+        form: error.response?.data?.message || "Something went wrong. Please try again.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -84,7 +121,13 @@ export default function Signup() {
             <p className="mt-2 text-sm text-slate-500">Sign up for your console.</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            {errors.form && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">
+                {errors.form}
+              </div>
+            )}
+
             {/* Email */}
             <div className="space-y-2">
               <label
@@ -100,12 +143,21 @@ export default function Signup() {
                 name="email"
                 autoComplete="email"
                 autoFocus
-                required
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setErrors((prev) => ({ ...prev, email: "", form: "" }));
+                }}
                 placeholder="test@example.com"
-                className="flex h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-950 focus:ring-2 focus:ring-slate-200"
+                className={`flex h-11 w-full rounded-xl border bg-white px-4 text-sm outline-none transition focus:ring-2 ${
+                  errors.email
+                    ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+                    : "border-slate-300 focus:border-slate-950 focus:ring-slate-200"
+                }`}
               />
+              {errors.email && (
+                <p className="text-xs text-red-500">{errors.email}</p>
+              )}
             </div>
 
             {/* Password */}
@@ -122,21 +174,31 @@ export default function Signup() {
                 type="password"
                 name="password"
                 autoComplete="new-password"
-                required
                 minLength={6}
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setErrors((prev) => ({ ...prev, password: "", form: "" }));
+                }}
                 placeholder="••••••••"
-                className="flex h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-950 focus:ring-2 focus:ring-slate-200"
+                className={`flex h-11 w-full rounded-xl border bg-white px-4 text-sm outline-none transition focus:ring-2 ${
+                  errors.password
+                    ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+                    : "border-slate-300 focus:border-slate-950 focus:ring-slate-200"
+                }`}
               />
+              {errors.password && (
+                <p className="text-xs text-red-500">{errors.password}</p>
+              )}
             </div>
 
             {/* Button */}
             <button
               type="submit"
-              className="flex h-12 w-full items-center justify-center rounded-2xl bg-slate-950 text-white font-medium transition hover:bg-slate-800"
+              disabled={submitting}
+              className="flex h-12 w-full items-center justify-center rounded-2xl bg-slate-950 text-white font-medium transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Sign up
+              {submitting ? "Signing up…" : "Sign up"}
             </button>
           </form>
 

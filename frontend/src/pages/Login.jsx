@@ -3,40 +3,65 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
   const navigate = useNavigate();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    const response = await axios.post(`${import.meta.env.VITE_API_URL}/users/login`, {
-      email,
-      password,
-    },{
-      withCredentials: true
-    });
+    const nextErrors = {};
+    const trimmedEmail = email.trim();
 
-    if (!email || !password) {
-      alert("Please fill all the fields");
+    if (!trimmedEmail) {
+      nextErrors.email = "This field is required";
+    } else if (!EMAIL_PATTERN.test(trimmedEmail)) {
+      nextErrors.email = "Please enter a valid email address";
+    }
+
+    if (!password) {
+      nextErrors.password = "This field is required";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
       return;
     }
 
-    if (response.status !== 200) {
-      alert("Invalid email or password");
-    }
+    setErrors({});
+    setSubmitting(true);
 
-    if (response.status === 200 && response.data.user.role === "desk") {
-      navigate("/desk/billing");
-    }
+    try {
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/users/login`,
+        { email: trimmedEmail, password },
+        { withCredentials: true },
+      );
 
-    if (response.status === 200 && response.data.user.role === "admin") {
-      navigate("/admin/dashboard");
-    }
+      localStorage.setItem("user", JSON.stringify(response.data.user));
 
-    localStorage.setItem("user", JSON.stringify(response.data.user));
+      if (response.data.user.role === "desk") {
+        navigate("/desk/billing");
+      } else if (response.data.user.role === "admin") {
+        navigate("/admin/dashboard");
+      }
+    } catch (error) {
+      const status = error.response?.status;
+      setErrors({
+        form:
+          status === 400 || status === 401
+            ? "Incorrect email or password"
+            : error.response?.data?.message || "Something went wrong. Please try again.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -99,7 +124,13 @@ export default function Login() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            {errors.form && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">
+                {errors.form}
+              </div>
+            )}
+
             {/* Email */}
             <div className="space-y-2">
               <label
@@ -115,12 +146,21 @@ export default function Login() {
                 name="email"
                 autoComplete="email"
                 autoFocus
-                required
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setErrors((prev) => ({ ...prev, email: "", form: "" }));
+                }}
                 placeholder="test@example.com"
-                className="flex h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-950 focus:ring-2 focus:ring-slate-200"
+                className={`flex h-11 w-full rounded-xl border bg-white px-4 text-sm outline-none transition focus:ring-2 ${
+                  errors.email
+                    ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+                    : "border-slate-300 focus:border-slate-950 focus:ring-slate-200"
+                }`}
               />
+              {errors.email && (
+                <p className="text-xs text-red-500">{errors.email}</p>
+              )}
             </div>
 
             {/* Password */}
@@ -137,21 +177,31 @@ export default function Login() {
                 type="password"
                 name="password"
                 autoComplete="current-password"
-                required
                 minLength={6}
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setErrors((prev) => ({ ...prev, password: "", form: "" }));
+                }}
                 placeholder="••••••••"
-                className="flex h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-950 focus:ring-2 focus:ring-slate-200"
+                className={`flex h-11 w-full rounded-xl border bg-white px-4 text-sm outline-none transition focus:ring-2 ${
+                  errors.password
+                    ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+                    : "border-slate-300 focus:border-slate-950 focus:ring-slate-200"
+                }`}
               />
+              {errors.password && (
+                <p className="text-xs text-red-500">{errors.password}</p>
+              )}
             </div>
 
             {/* Button */}
             <button
               type="submit"
-              className="flex h-12 w-full items-center justify-center rounded-2xl bg-slate-950 text-white font-medium transition hover:bg-slate-800"
+              disabled={submitting}
+              className="flex h-12 w-full items-center justify-center rounded-2xl bg-slate-950 text-white font-medium transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Sign in
+              {submitting ? "Signing in…" : "Sign in"}
             </button>
           </form>
 

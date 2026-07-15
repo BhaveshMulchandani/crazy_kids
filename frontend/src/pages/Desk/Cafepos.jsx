@@ -206,7 +206,9 @@ function Cafepos() {
   const [searchResults, setSearchResults] = React.useState([]);
   const [searchLoading, setSearchLoading] = React.useState(false);
   const [customer, setCustomer] = React.useState(null);
+  const [customerSnapshot, setCustomerSnapshot] = React.useState(null);
   const [tableNumber, setTableNumber] = React.useState("");
+  const [tableNumberSnapshot, setTableNumberSnapshot] = React.useState("");
   const [tableNumberError, setTableNumberError] = React.useState("");
   const [cat, setCat] = React.useState("all");
   const [cart, setCart] = React.useState([]);
@@ -217,15 +219,36 @@ function Cafepos() {
   const [loadingMenu, setLoadingMenu] = React.useState(false);
   const preSelectedSession = location.state?.session;
 
+  // Selecting a customer also autofills the Table Number: if this customer
+  // already has a KOT on file for their current play session, they've
+  // already been seated at a table — reuse it instead of making the
+  // operator retype it for every additional round of orders.
+  const applyCustomerSession = React.useCallback(async (session) => {
+    if (!session) return;
+
+    setCustomer(session);
+    setSearchResults([]);
+    setTableNumberError("");
+
+    try {
+      const res = await axios.get(
+        `${import.meta.env.VITE_API_URL}/cafe/session/${session._id}`,
+        { withCredentials: true },
+      );
+      const kots = res.data?.kots ?? [];
+      setTableNumber(kots[0]?.tableNumber || "");
+    } catch (error) {
+      console.warn("Unable to fetch existing table number for session", error);
+      setTableNumber("");
+    }
+  }, []);
+
   React.useEffect(() => {
-  if (!preSelectedSession) return;
+    if (!preSelectedSession) return;
 
-  setCustomer(preSelectedSession);
-
-  setCustomerLookup(
-    preSelectedSession.parentName
-  );
-}, [preSelectedSession]);
+    applyCustomerSession(preSelectedSession);
+    setCustomerLookup(preSelectedSession.parentName);
+  }, [preSelectedSession, applyCustomerSession]);
 
   React.useEffect(() => {
     const fetchMenu = async () => {
@@ -282,8 +305,7 @@ function Cafepos() {
         return;
       }
       if (sessions.length === 1) {
-        setCustomer(sessions[0]);
-        setSearchResults([]);
+        applyCustomerSession(sessions[0]);
       } else {
         setSearchResults(sessions);
       }
@@ -296,8 +318,7 @@ function Cafepos() {
   };
 
   const selectSession = (session) => {
-    setCustomer(session);
-    setSearchResults([]);
+    applyCustomerSession(session);
   };
 
   const add = (item) => {
@@ -381,10 +402,23 @@ function Cafepos() {
         console.log("KOT fetch failed, using created data", err);
       }
 
+      // Snapshot what the receipt dialog needs before clearing the form —
+      // the dialog stays open (and must keep showing this order's customer
+      // and table) even though the live fields below are reset for the
+      // next order.
       setCartSnapshot([...cart]);
+      setCustomerSnapshot(customer);
+      setTableNumberSnapshot(tableNumber);
       setKot(fullKot);
-      setCart([]);
       toast.success(`Order placed · ₹${total}`);
+
+      setCart([]);
+      setCustomer(null);
+      setCustomerLookup("");
+      setSearchResults([]);
+      setTableNumber("");
+      setTableNumberError("");
+      setSearch("");
     } catch (error) {
       console.log(error);
       toast.error(error.response?.data?.message || "Failed to place order");
@@ -580,9 +614,9 @@ function Cafepos() {
 
       <ReceiptDialog
         kot={kot}
-        customer={customer}
+        customer={customerSnapshot}
         cartSnapshot={cartSnapshot}
-        tableNumber={tableNumber}
+        tableNumber={tableNumberSnapshot}
         onClose={() => setKot(null)}
       />
     </div>

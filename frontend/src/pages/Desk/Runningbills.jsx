@@ -463,7 +463,11 @@ const BillCard = ({
   });
   const socksCharge = calculateSocksCharge(bill, pricingSettings);
   const total = sessionCharge.total + foodCharge.total + socksCharge.socksTotal;
-  const paymentSummary = getSessionPaymentSummary(bill, sessionCharge);
+  // Must be the combined grand total (session + cafe + socks), not just
+  // sessionCharge — otherwise a membership session (sessionCharge.total is
+  // always 0, membership covers it) shows ₹0 pending even when there's a
+  // real cafe bill still owed.
+  const paymentSummary = getSessionPaymentSummary(bill, { total });
 
   const isOverdue = Boolean(
     bill?.scheduledEndTime && new Date(bill.scheduledEndTime) <= new Date(),
@@ -484,7 +488,7 @@ const BillCard = ({
   return (
     <div
       id={`bill-${bill._id}`}
-      className={`surface-card p-5 transition-all ${
+      className={`surface-card p-3.5 transition-all ${
         paused ? "ring-2 ring-amber-400/60" : ""
       } ${hasBirthday ? "ring-2 ring-pink-500 bg-pink-50" : ""} ${
         highlighted ? "ring-2 ring-blue-500 ring-offset-2" : ""
@@ -495,18 +499,18 @@ const BillCard = ({
           <div className="text-xs font-medium text-muted-foreground font-mono tracking-tight">
             {bill.sessionNumber}
           </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <div className="font-bold text-lg leading-tight tracking-tight">
+          <div className="flex items-center gap-2">
+            <div className="font-bold text-base leading-tight tracking-tight">
               {bill.parentName}
             </div>
 
             {hasBirthday && (
-              <span className="rounded-full bg-pink-600 px-2 py-1 text-xs font-semibold text-white">
+              <span className="rounded-full bg-pink-600 px-2 py-0.5 text-xs font-semibold text-white">
                 🎂 Birthday
               </span>
             )}
           </div>
-          <div className="text-xs text-muted-foreground mt-0.5">
+          <div className="text-xs text-muted-foreground">
             {bill.mobileNumber}
           </div>
         </div>
@@ -538,7 +542,7 @@ const BillCard = ({
         </span>
       </div>
 
-      <div className="mt-3 space-y-1.5">
+      <div className="mt-2 space-y-1">
         {children.map((c, i) => {
           const isBirthday = isBirthdayChild(c);
           const timer = c.timer || {};
@@ -549,7 +553,7 @@ const BillCard = ({
           return (
             <div
               key={i}
-              className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs ${
+              className={`flex items-center justify-between gap-2 px-2 py-1 rounded-lg text-xs ${
                 isBirthday ? "bg-pink-600 text-white" : "bg-secondary"
               }`}
             >
@@ -591,7 +595,7 @@ const BillCard = ({
         })}
       </div>
 
-      <div className="mt-4 font-mono text-3xl font-bold tabular-nums text-primary">
+      <div className="mt-2 font-mono text-2xl font-bold tabular-nums text-primary leading-none">
         {getTimerText()}
       </div>
       <div className="text-xs text-muted-foreground mt-0.5">
@@ -601,26 +605,26 @@ const BillCard = ({
           : ""}
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-lg border border-border/60 bg-white p-2">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Session</div>
+      <div className="mt-2.5 grid grid-cols-3 gap-1.5 text-center">
+        <div className="rounded-lg border border-border/60 bg-white p-1.5">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Session</div>
           <div className="text-sm font-bold tabular-nums">
             {formatCurrency(sessionCharge.total)}
           </div>
         </div>
-        <div className="rounded-lg border border-border/60 bg-white p-2">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Cafe</div>
+        <div className="rounded-lg border border-border/60 bg-white p-1.5">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Cafe</div>
           <div className="text-sm font-bold tabular-nums">
             {formatCurrency(foodCharge.total)}
           </div>
         </div>
-        <div className="rounded-lg border border-primary/30 bg-primary/5 p-2">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-primary/80">Total</div>
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-1.5">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-primary/80">Total</div>
           <div className="text-sm font-bold tabular-nums text-primary">{formatCurrency(total)}</div>
         </div>
       </div>
-      <div className="mt-3 rounded-lg border border-border/60 bg-secondary/40 p-3 text-xs space-y-0.5">
-        <Row k="Session Charges" v={formatCurrency(sessionCharge.subtotal)} />
+      <div className="mt-2 rounded-lg border border-border/60 bg-secondary/40 p-2 text-xs space-y-0.5">
+        <Row k="Session Charges (18% GST Inclusive)" v={formatCurrency(sessionCharge.subtotal)} />
         {sessionCharge.membershipApplied && (
           <Row k="Membership" v="Applied" />
         )}
@@ -633,7 +637,7 @@ const BillCard = ({
         {!sessionCharge.membershipApplied && sessionCharge.discountAmount > 0 && (
           <Row k="Discount Amount" v={`-${formatCurrency(sessionCharge.discountAmount)}`} accent="oklch(0.62 0.17 155)" />
         )}
-        <div className="border-t border-dashed border-border/60 my-1 pt-1">
+        <div className="border-t border-dashed border-border/60 pt-0.5">
           <Row k="Final Session Charges" v={formatCurrency(sessionCharge.total)} bold />
         </div>
         {socksCharge.socksQty > 0 && (
@@ -642,17 +646,18 @@ const BillCard = ({
             v={formatCurrency(socksCharge.socksTotal)}
           />
         )}
-        <div className="border-t border-border/60 my-1 pt-1 space-y-0.5">
+        {/* Cafe is always chargeable regardless of membership/offer, so it
+            always gets its own line here — not folded into Session Charges
+            above, which membership can zero out. */}
+        <Row k="Cafe Total" v={formatCurrency(foodCharge.total)} />
+        <div className="border-t border-border/60 pt-0.5 space-y-0.5">
           <Row k="Amount Paid" v={formatCurrency(paymentSummary.amountPaid)} />
           <Row k="Pending Amount" v={formatCurrency(paymentSummary.pendingAmount)} />
           <Row k="Payment Status" v={paymentSummary.paymentStatusLabel} />
         </div>
-        <div className="mt-1.5 text-[11px] text-muted-foreground">
-          18% GST Inclusive
-        </div>
       </div>
 
-      <div className="mt-4 flex gap-2.5">
+      <div className="mt-2.5 flex gap-2">
         {bill.status === "booked" && (
           <Button
             size="sm"
@@ -738,13 +743,18 @@ const CheckoutDialog = ({
 }) => {
   const bill = bills.find((b) => b._id === billId);
   const [submitting, setSubmitting] = useState(false);
+  const [extraDiscount, setExtraDiscount] = useState("");
   const sessionCharge = calculateSessionCharge(bill, pricingSettings);
   const foodCharge = calculateFoodCharge({
     ...bill,
     kots: kotsBySession?.[bill?._id] || [],
   });
   const socksCharge = calculateSocksCharge(bill, pricingSettings);
-  const total = sessionCharge.total + foodCharge.total + socksCharge.socksTotal;
+  const preDiscountTotal = sessionCharge.total + foodCharge.total + socksCharge.socksTotal;
+  // Operator-entered discount on top of any offer/membership pricing —
+  // capped so it can never push the payable amount below zero.
+  const extraDiscountAmount = Math.min(Math.max(Number(extraDiscount) || 0, 0), preDiscountTotal);
+  const total = preDiscountTotal - extraDiscountAmount;
   const paymentSummary = getSessionPaymentSummary(bill, { total });
   const loyaltyPoints = calculateLoyaltyPoints(total, pricingSettings);
 
@@ -756,7 +766,7 @@ const CheckoutDialog = ({
     try {
       await axios.patch(
         `${import.meta.env.VITE_API_URL}/session/complete/${bill._id}`,
-        {},
+        { extraDiscount: extraDiscountAmount },
         { withCredentials: true },
       );
 
@@ -792,7 +802,7 @@ const CheckoutDialog = ({
         </DialogHeader>
         <div className="text-sm">
           <div className="rounded-xl border border-border/60 bg-secondary/30 p-4 space-y-0.5">
-            <Row k="Session Charges" v={formatCurrency(sessionCharge.subtotal)} />
+            <Row k="Session Charges (18% GST Inclusive)" v={formatCurrency(sessionCharge.subtotal)} />
             {sessionCharge.membershipApplied && (
               <Row k="Membership" v="Applied" />
             )}
@@ -832,17 +842,30 @@ const CheckoutDialog = ({
 
           <div className="space-y-1.5 mt-3">
             <Label className="text-xs">Extra discount (₹)</Label>
-            <Input type="text" value="--" disabled />
+            <Input
+              type="number"
+              min="0"
+              max={preDiscountTotal}
+              value={extraDiscount}
+              onChange={(e) => setExtraDiscount(e.target.value)}
+              placeholder="0"
+            />
           </div>
 
           <div className="rounded-xl border border-border/60 bg-secondary/30 p-4 mt-3 space-y-0.5">
+            <Row k="Payment Status" v={paymentSummary.paymentStatusLabel} />
             <Row k="Amount Paid" v={formatCurrency(paymentSummary.amountPaid)} />
             <Row k="Pending Amount" v={formatCurrency(paymentSummary.pendingAmount)} />
-            <div className="text-xs text-muted-foreground py-0.5">18% GST Inclusive</div>
             <Row k="Loyalty Points Earned" v={loyaltyPoints.toString()} />
           </div>
 
-          <div className="mt-4 flex justify-between items-center rounded-xl border-2 border-primary/30 bg-white px-4 py-3">
+          {extraDiscountAmount > 0 && (
+            <div className="mt-3">
+              <Row k="Extra Discount" v={`-${formatCurrency(extraDiscountAmount)}`} accent="oklch(0.62 0.17 155)" bold />
+            </div>
+          )}
+
+          <div className="mt-3 flex justify-between items-center rounded-xl border-2 border-primary/30 bg-white px-4 py-3">
             <span className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">Final Amount</span>
             <span className="text-2xl font-bold text-primary tabular-nums">
               {formatCurrency(total)}
@@ -943,14 +966,9 @@ const InvoiceDialog = ({ invoice, onClose }) => {
   const sessionDetails = invoice?.sessionDetails || {};
   const cafeItems = invoice?.cafeItems || [];
   const charges = invoice?.charges || {};
-  const payment = invoice?.payment || {};
   const start = sessionDetails?.startTime ? new Date(sessionDetails.startTime) : null;
   const end = sessionDetails?.endTime ? new Date(sessionDetails.endTime) : null;
   const durMin = sessionDetails?.actualDurationMinutes || 0;
-  const paymentSummary = {
-    amountPaid: Number(payment?.amountPaid || 0),
-    pendingAmount: Number(payment?.pendingAmount || 0),
-  };
   const loyaltyPoints = Number(charges?.loyaltyPoints ?? calculateLoyaltyPoints(charges?.grandTotal || 0, {}));
 
   return (
@@ -999,10 +1017,6 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             <div><span style={{ color: INVOICE_MUTED }}>Band</span><br />{customer.bandNumber || invoice.bandNumber || "—"}</div>
             <div><span style={{ color: INVOICE_MUTED }}>Session</span><br />{customer.sessionNumber || invoice.sessionNumber || "—"}</div>
             {customer.city && <div><span style={{ color: INVOICE_MUTED }}>City</span><br />{customer.city}</div>}
-            <div>
-              <span style={{ color: INVOICE_MUTED }}>Payment</span><br />
-              {payment.status === "paid" ? "Paid" : payment.status === "partially_paid" ? "Partially paid" : "Pending"}
-            </div>
           </div>
 
           <table>
@@ -1100,7 +1114,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
           </table>
 
           <div style={{ marginTop: 8, paddingTop: 4 }}>
-            <InvoiceRow label="Session Charges" value={formatCurrency(charges?.normalSessionTotal ?? charges?.sessionTotal ?? 0)} />
+            <InvoiceRow label="Session Charges (18% GST Inclusive)" value={formatCurrency(charges?.normalSessionTotal ?? charges?.sessionTotal ?? 0)} />
             {invoice.membership?.applied && (
               <>
                 <InvoiceRow label={`Membership Applied (${invoice.membership.hoursConsumed}h)`} value="Session charge ₹0" />
@@ -1142,29 +1156,30 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               )}
             </div>
 
+            {charges?.extraDiscountAmount > 0 && (
+              <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 8, paddingTop: 6 }}>
+                <InvoiceRow label="Extra Discount" value={`-${formatCurrency(charges.extraDiscountAmount)}`} color="#059669" bold />
+              </div>
+            )}
+
             <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 8, paddingTop: 6 }}>
-              <InvoiceRow label="Amount Paid" value={formatCurrency(paymentSummary.amountPaid)} />
-              <InvoiceRow label="Pending Amount" value={formatCurrency(paymentSummary.pendingAmount)} />
-              <InvoiceRow label="18% GST Inclusive" value="—" muted />
               <InvoiceRow label="Loyalty Points Earned" value={loyaltyPoints} />
             </div>
 
             <div
               style={{
                 marginTop: 12,
+                paddingTop: 10,
+                borderTop: `2px solid ${INVOICE_ACCENT}`,
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                background: INVOICE_ACCENT,
-                color: "#ffffff",
-                borderRadius: 8,
-                padding: "12px 16px",
               }}
             >
-              <span style={{ fontSize: 12.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: INVOICE_ACCENT }}>
                 Grand Total
               </span>
-              <span style={{ fontSize: 20, fontWeight: 800 }}>{formatCurrency(charges?.grandTotal || 0)}</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: INVOICE_ACCENT }}>{formatCurrency(charges?.grandTotal || 0)}</span>
             </div>
           </div>
 

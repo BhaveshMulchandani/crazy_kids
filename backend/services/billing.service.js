@@ -5,7 +5,7 @@ const { refreshStatus } = require("../controllers/membership.controller");
 const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const dayName = (date) => new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
 
-const calculateInvoiceCharges = async ({ session, settings, kots }) => {
+const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount }) => {
   const totalHours = Number(session.totalHours || 1);
   const extensionHours = Math.max(totalHours - 1, 0);
   const children = Array.isArray(session.children) ? session.children : [];
@@ -59,8 +59,13 @@ const calculateInvoiceCharges = async ({ session, settings, kots }) => {
   const socksQty = children.filter((child) => child.socksOpted).length;
   const socksRate = Number(settings?.socksCost || 0);
   const socksTotal = round(socksQty * socksRate);
-  const grandTotal = round(sessionTotal + cafeTotal + membershipPurchaseTotal + socksTotal);
-  return { totalHours, extensionHours, childCharges, cafeItems, normalSessionTotal, sessionTotal, cafeSubtotal, cafeGST, cafeTotal, grandTotal, discountAmount, membershipApplied, membership, specialPricingApplied, offer: offer ? { name: offer.name, type: offer.type, value: offer.value } : null, membershipPurchase, socksQty, socksRate, socksTotal };
+  const preDiscountGrandTotal = round(sessionTotal + cafeTotal + membershipPurchaseTotal + socksTotal);
+  // An operator-entered discount applied at checkout, on top of any
+  // offer/membership pricing — capped so it can never take the payable
+  // amount below zero.
+  const extraDiscountAmount = round(Math.min(Math.max(Number(extraDiscount) || 0, 0), preDiscountGrandTotal));
+  const grandTotal = round(preDiscountGrandTotal - extraDiscountAmount);
+  return { totalHours, extensionHours, childCharges, cafeItems, normalSessionTotal, sessionTotal, cafeSubtotal, cafeGST, cafeTotal, grandTotal, discountAmount, extraDiscountAmount, membershipApplied, membership, specialPricingApplied, offer: offer ? { name: offer.name, type: offer.type, value: offer.value } : null, membershipPurchase, socksQty, socksRate, socksTotal };
 };
 
 module.exports = { calculateInvoiceCharges, round };

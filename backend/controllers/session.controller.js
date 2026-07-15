@@ -585,6 +585,7 @@ const extendsession = async (req, res) => {
 const completesession = async (req, res) => {
   try {
     const { id } = req.params;
+    const { extraDiscount } = req.body || {};
 
     const session = await sessionmodel.findById(id);
 
@@ -612,7 +613,7 @@ const completesession = async (req, res) => {
     if (!existingInvoice) {
       const settings = await PriceSetting.findOne();
       const kots = await KOT.find({ session: id }).sort({ createdAt: -1 });
-      const calculation = await calculateInvoiceCharges({ session, settings, kots });
+      const calculation = await calculateInvoiceCharges({ session, settings, kots, extraDiscount });
       let hoursBeforeSession = 0;
       if (calculation.membershipApplied) {
         hoursBeforeSession = Number(calculation.membership.remainingPlayHours);
@@ -630,7 +631,7 @@ const completesession = async (req, res) => {
         children: calculation.childCharges,
         sessionDetails: { startTime: session.startTime, endTime: session.actualEndTime, actualDurationMinutes, totalHours: calculation.totalHours, extensionHours: calculation.extensionHours, pauseTimeMinutes: session.totalPausedMinutes || 0 },
         cafeItems: calculation.cafeItems,
-        charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0), socksQty: calculation.socksQty, socksRate: calculation.socksRate, socksTotal: calculation.socksTotal },
+        charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, extraDiscountAmount: calculation.extraDiscountAmount, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0), socksQty: calculation.socksQty, socksRate: calculation.socksRate, socksTotal: calculation.socksTotal },
         offer: { name: calculation.offer?.name || "", type: calculation.offer?.type || "", discountAmount: calculation.discountAmount, specialPricingApplied: calculation.specialPricingApplied },
         membership: { applied: calculation.membershipApplied, membership: calculation.membership?._id || null, planName: calculation.membership?.planName || "", hoursConsumed: calculation.membershipApplied ? calculation.totalHours : 0, hoursBeforeSession: calculation.membershipApplied ? hoursBeforeSession : 0, remainingHours: calculation.membershipApplied ? calculation.membership.remainingPlayHours : 0, expiryDate: calculation.membershipApplied ? calculation.membership.expiryDate : null, purchase: { planName: calculation.membershipPurchase?.planName || "", price: Number(calculation.membershipPurchase?.price || 0) } },
         payment: { status: session.paymentStatus || "pending", breakdown: session.paymentBreakdown || [], amountPaid: Number(session.amountPaid || 0), pendingAmount: Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0) },
@@ -801,9 +802,20 @@ const searchBillingCustomer = async (req, res) => {
         totals.reward_points += Number(invoice.charges?.loyaltyPoints || 0);
       }
     });
+    // `matches` is sorted newest-first, so the first session seen per
+    // mobile number is kept as the customer's profile. But that latest
+    // visit may have left an optional field (city, gender, band number)
+    // blank even though an earlier visit had it on file — backfill from
+    // those older sessions rather than surfacing a blank value when a
+    // saved one exists elsewhere in the customer's history.
     const customers = matches.reduce((uniqueCustomers, session) => {
       if (!uniqueCustomers.has(session.mobileNumber)) {
         uniqueCustomers.set(session.mobileNumber, { ...session.toObject(), ...(totalsByMobile.get(session.mobileNumber) || {}) });
+      } else {
+        const existing = uniqueCustomers.get(session.mobileNumber);
+        if (!existing.city && session.city) existing.city = session.city;
+        if (!existing.gender && session.gender) existing.gender = session.gender;
+        if (!existing.bandNumber && session.bandNumber) existing.bandNumber = session.bandNumber;
       }
       return uniqueCustomers;
     }, new Map());

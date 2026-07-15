@@ -52,6 +52,7 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
       loyaltyPoints,
       normalSessionTotal: calculation.normalSessionTotal,
       discountAmount: calculation.discountAmount,
+      extraDiscountAmount: calculation.extraDiscountAmount,
       membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0),
       socksQty: calculation.socksQty,
       socksRate: calculation.socksRate,
