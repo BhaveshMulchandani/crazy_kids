@@ -63,8 +63,13 @@ const calculateEstimatedSessionCharge = (children, pricingSettings) => {
     return total + firstHourRate + Math.max(hours - 1, 0) * extensionRate;
   }, 0);
 
+  const socksQty = (children || []).filter((child) => child?.socksOpted).length;
+  const socksTotal = socksQty * Number(pricingSettings?.socksCost ?? 0);
+
   return {
-    total:subtotal
+    total: subtotal + socksTotal,
+    socksQty,
+    socksTotal,
   };
 };
 
@@ -158,8 +163,9 @@ function BillingPage() {
   const [searchResults, setSearchResults] = useState([]);
   const [parentName, setParentName] = useState("");
   const [mobile, setMobile] = useState("");
-  const [children, setChildren] = useState([{ name: "", dob: "" }]);
-  const [socks, setSocks] = useState(false);
+  const [gender, setGender] = useState("");
+  const [city, setCity] = useState("");
+  const [children, setChildren] = useState([{ name: "", dob: "", socksOpted: false }]);
   const [notes, setNotes] = useState("");
   const [bandNumber, setBandNumber] = useState("");
   const [offerId, setOfferId] = useState("none");
@@ -221,7 +227,7 @@ function BillingPage() {
   }, []);
 
   const addChild = () => {
-    setChildren([...children, { name: "", dob: "" }]);
+    setChildren([...children, { name: "", dob: "", socksOpted: false }]);
   };
 
   const removeChild = (i) => {
@@ -252,6 +258,8 @@ function BillingPage() {
     setCustomer(selectedCustomer);
     setParentName(selectedCustomer.parentName || "");
     setMobile(selectedCustomer.mobileNumber || "");
+    setGender(selectedCustomer.gender || "");
+    setCity(selectedCustomer.city || "");
     setBandNumber(selectedCustomer.bandNumber || "");
     setReference(selectedCustomer.reference || "");
     setNotes(selectedCustomer.notes || "");
@@ -259,13 +267,20 @@ function BillingPage() {
     const mappedChildren = (selectedCustomer.children || []).map((child) => ({
       name: child.name || "",
       dob: child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "",
+      socksOpted: false,
     }));
 
-    setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "" }]);
+    setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "", socksOpted: false }]);
     setSearchResults([]);
     setErrors((prev) => ({ ...prev, parentName: "", mobile: "" }));
     axios.get(`${API_BASE}/memberships/active/${encodeURIComponent(selectedCustomer.mobileNumber || "")}`, { withCredentials: true })
-      .then((response) => setMembership(response.data?.membership || null))
+      .then((response) => {
+        const activeMembership = response.data?.membership || null;
+        setMembership(activeMembership);
+        // Membership always overrides offers — don't leave a stale offer
+        // selected once we know this customer already has an active one.
+        if (activeMembership) setOfferId("none");
+      })
       .catch(() => setMembership(null));
   };
 
@@ -374,6 +389,7 @@ function BillingPage() {
         .map((c) => ({
           name: c.name.trim(),
           dob: c.dob,
+          socksOpted: Boolean(c.socksOpted),
         }));
 
       const sessionCharge = calculateEstimatedSessionCharge(
@@ -394,6 +410,8 @@ function BillingPage() {
       const payload = {
         parentName,
         mobileNumber: mobile,
+        gender,
+        city,
         bandNumber,
 
         children: validChildrenPayload,
@@ -403,7 +421,7 @@ function BillingPage() {
 
         reference,
 
-        socksRequired: socks,
+        socksRequired: validChildrenPayload.some((c) => c.socksOpted),
 
         notes,
         paymentStatus,
@@ -441,15 +459,16 @@ function BillingPage() {
     setCustomer(null);
     setParentName("");
     setMobile("");
+    setGender("");
+    setCity("");
     setLookup("");
     setSearchResults([]);
-    setChildren([{ name: "", dob: "" }]);
+    setChildren([{ name: "", dob: "", socksOpted: false }]);
     setBandNumber("");
     setOfferId("none");
     setMembershipPlanId("none");
     setMembership(null);
     setReference("");
-    setSocks(false);
     setNotes("");
     setPaymentStatus("pending");
     setPaymentMethod("cash");
@@ -580,6 +599,30 @@ function BillingPage() {
             </div>
           </div>
 
+          <div className="grid grid-cols-3 gap-5">
+            <div className="space-y-2">
+              <Label>Gender (optional)</Label>
+              <select
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+              >
+                <option value="">Not specified</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div className="col-span-2 space-y-2">
+              <Label>City (optional)</Label>
+              <Input
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="Ahmedabad"
+              />
+            </div>
+          </div>
+
           <div>
             <div className="flex items-center justify-between mb-3">
               <Label className="flex items-center gap-1.5">
@@ -599,7 +642,7 @@ function BillingPage() {
                     key={i}
                     className="grid grid-cols-12 gap-2 items-center p-3 rounded-xl bg-secondary/40 border"
                   >
-                    <div className="col-span-5">
+                    <div className="col-span-4">
                       <Input
                         placeholder="Child name"
                         value={c.name}
@@ -611,10 +654,10 @@ function BillingPage() {
                       />
                       {childNameError && <p className="mt-1 text-xs text-red-500">{childNameError}</p>}
                     </div>
-                      <div className="col-span-4">
+                      <div className="col-span-3">
                         {isBirthdayToday(c.dob) && (
                           <div className="mb-2 rounded-md bg-pink-100 border border-pink-300 px-3 py-2 text-sm font-semibold text-pink-700">
-                             🎉 Today is {c.name ? `${c.name}'s Birthday!` : "this child's Birthday!"} 
+                             🎉 Today is {c.name ? `${c.name}'s Birthday!` : "this child's Birthday!"}
                           </div>
                         )}
 
@@ -645,6 +688,13 @@ function BillingPage() {
                         <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </div>
+                    <div className="col-span-2 flex items-center justify-center gap-1.5">
+                      <Switch
+                        checked={Boolean(c.socksOpted)}
+                        onCheckedChange={(checked) => updateChild(i, { socksOpted: checked })}
+                      />
+                      <span className="text-xs text-muted-foreground">Socks</span>
+                    </div>
                     <div className="col-span-1 text-right">
                       {children.length > 1 && (
                         <Button
@@ -664,10 +714,11 @@ function BillingPage() {
 
           <div className="grid grid-cols-2 gap-5">
             <div className="space-y-2">
-              <Label>Offer</Label>
+              <Label>Offer{membership ? " (unavailable — active membership applies)" : ""}</Label>
               <select
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 value={offerId}
+                disabled={!!membership}
                 onChange={(e) => setOfferId(e.target.value)}
               >
                 <option value="none">No offer</option>
@@ -815,18 +866,6 @@ function BillingPage() {
               {errors.paymentBreakdown && <p className="text-xs text-red-500">{errors.paymentBreakdown}</p>}
             </div>
           )}
-
-          <div className="grid grid-cols-2 gap-5">
-            <div className="space-y-2">
-              <Label>Socks Required?</Label>
-              <div className="h-10 flex items-center gap-3 px-4 rounded-lg border bg-secondary/50">
-                <Switch checked={socks} onCheckedChange={setSocks} />
-                <span className="text-sm">
-                  {socks ? "Yes — added to bill" : "No"}
-                </span>
-              </div>
-            </div>
-          </div>
 
           <div className="flex gap-3 pt-2">
             <Button

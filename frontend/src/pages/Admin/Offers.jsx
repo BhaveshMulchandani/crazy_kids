@@ -1,6 +1,6 @@
 import * as React from "react";
 import axios from "axios";
-import { BadgeIndianRupee, Gift, Percent, Plus, Trash2 } from "lucide-react";
+import { BadgeIndianRupee, Gift, Percent, Plus, Trash2, Wallet } from "lucide-react";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -222,12 +222,14 @@ const API_BASE = `${import.meta.env.VITE_API_URL}`;
 const iconByType = {
   membership: Gift,
   discount: Percent,
+  flat_discount: Wallet,
   special_pricing: BadgeIndianRupee,
 };
 
 const typeLabel = {
   membership: "Membership",
   discount: "Percentage Discount",
+  flat_discount: "Flat Amount Discount",
   special_pricing: "Special Pricing",
 };
 
@@ -242,6 +244,9 @@ const defaultRulesByType = {
   discount: {
     minKids: 5,
   },
+  flat_discount: {
+    minKids: 5,
+  },
   special_pricing: {
     day: "Wednesday",
     firstHourPrice: 350,
@@ -252,6 +257,7 @@ const defaultRulesByType = {
 const offerTypeOptions = [
   { value: "membership", label: "Membership" },
   { value: "discount", label: "Percentage Discount" },
+  { value: "flat_discount", label: "Flat Amount Discount" },
   { value: "special_pricing", label: "Special Pricing" },
 ];
 
@@ -373,6 +379,29 @@ const DiscountFields = ({ value, rules, setValue, setRules }) => (
   </div>
 );
 
+const FlatDiscountFields = ({ value, rules, setValue, setRules }) => (
+  <div className="grid gap-3 sm:grid-cols-2">
+    <div>
+      <Label>Discount Amount (₹)</Label>
+      <Input
+        type="number"
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        placeholder="100"
+      />
+    </div>
+    <div>
+      <Label>Minimum Kids Required</Label>
+      <Input
+        type="number"
+        value={rules.minKids}
+        onChange={(event) => setRules({ ...rules, minKids: Number(event.target.value) })}
+        placeholder="5"
+      />
+    </div>
+  </div>
+);
+
 const SpecialPricingFields = ({ rules, setRules }) => (
   <div className="space-y-4">
     <div>
@@ -426,7 +455,15 @@ function Offers() {
   const updateType = (nextType) => {
     setType(nextType);
     setRules(defaultRulesByType[nextType]);
-    setValue(nextType === "discount" ? 10 : nextType === "membership" ? 4500 : 0);
+    setValue(
+      nextType === "discount"
+        ? 10
+        : nextType === "flat_discount"
+          ? 100
+          : nextType === "membership"
+            ? 4500
+            : 0,
+    );
   };
 
   const fetchOffers = React.useCallback(async () => {
@@ -575,6 +612,12 @@ function Offers() {
                     <div className="text-sm">Minimum Kids: {offer.rules.minKids}</div>
                   </div>
                 )}
+                {offer.type === "flat_discount" && (
+                  <div className="mt-5 space-y-2 text-foreground">
+                    <div className="text-3xl font-semibold">₹{offer.value} off</div>
+                    <div className="text-sm">Minimum Kids: {offer.rules.minKids}</div>
+                  </div>
+                )}
                 {offer.type === "special_pricing" && (
                   <div className="mt-5 space-y-2 text-foreground">
                     <div className="text-3xl font-semibold">{offer.rules.day}</div>
@@ -637,6 +680,9 @@ function Offers() {
             )}
             {type === "discount" && (
               <DiscountFields value={value} rules={rules} setValue={setValue} setRules={setRules} />
+            )}
+            {type === "flat_discount" && (
+              <FlatDiscountFields value={value} rules={rules} setValue={setValue} setRules={setRules} />
             )}
             {type === "special_pricing" && (
               <SpecialPricingFields rules={rules} setRules={setRules} />

@@ -15,6 +15,7 @@ const offerSchema = new mongoose.Schema({
     required: true,
     enum: [
       "discount",
+      "flat_discount",
       "membership",
       "special_pricing",
     ],

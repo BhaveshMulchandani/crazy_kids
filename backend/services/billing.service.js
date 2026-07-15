@@ -9,9 +9,26 @@ const calculateInvoiceCharges = async ({ session, settings, kots }) => {
   const totalHours = Number(session.totalHours || 1);
   const extensionHours = Math.max(totalHours - 1, 0);
   const children = Array.isArray(session.children) ? session.children : [];
-  let offer = session.offer && typeof session.offer === "object" ? session.offer : null;
-  if (!offer && session.offer) offer = await Offer.findById(session.offer);
-  if (offer && !offer.active) offer = null;
+
+  // Membership is resolved before the offer, and always wins: when an
+  // active membership covers this session, any offer attached to the
+  // session is ignored outright — not fetched, not applied to child
+  // pricing, and not recorded — rather than merely zeroed out numerically.
+  let membershipApplied = false;
+  let membership = null;
+  const membershipId = session.membership?._id || session.membership;
+  if (membershipId) {
+    membership = await Membership.findById(membershipId);
+    if (membership) refreshStatus(membership);
+    if (membership?.status === "active" && membership.kidsAllowed >= children.length && membership.remainingPlayHours >= totalHours) membershipApplied = true;
+  }
+
+  let offer = null;
+  if (!membershipApplied) {
+    offer = session.offer && typeof session.offer === "object" ? session.offer : null;
+    if (!offer && session.offer) offer = await Offer.findById(session.offer);
+    if (offer && !offer.active) offer = null;
+  }
 
   let specialPricingApplied = false;
   const specialDayMatches = offer?.type === "special_pricing" && String(offer.rules?.day || "").toLowerCase() === dayName(new Date()).toLowerCase();
@@ -22,28 +39,28 @@ const calculateInvoiceCharges = async ({ session, settings, kots }) => {
     const firstHourCharge = specialDayMatches ? Number(offer.rules?.firstHourPrice || 0) : normalFirst;
     const extensionRate = specialDayMatches ? Number(offer.rules?.nextHourPrice || 0) : normalExtension;
     if (specialDayMatches) specialPricingApplied = true;
-    return { name: child.name || "", dob: child.dob || null, age: Number(child.age || 0), firstHourCharge, extensionHours, extensionRate, childTotal: round(firstHourCharge + extensionHours * extensionRate) };
+    return { name: child.name || "", dob: child.dob || null, age: Number(child.age || 0), firstHourCharge, extensionHours, extensionRate, childTotal: round(firstHourCharge + extensionHours * extensionRate), socksOpted: Boolean(child.socksOpted) };
   });
   const normalSessionTotal = round(childCharges.reduce((sum, child) => sum + child.childTotal, 0));
+  const offerConditionsMet = offer && children.length >= Number(offer.rules?.minKids || Infinity);
   let discountAmount = 0;
-  if (offer?.type === "discount" && children.length >= Number(offer.rules?.minKids || Infinity)) discountAmount = round(normalSessionTotal * Number(offer.value || 0) / 100);
-  let membershipApplied = false;
-  let membership = null;
-  const membershipId = session.membership?._id || session.membership;
-  if (membershipId) {
-    membership = await Membership.findById(membershipId);
-    if (membership) refreshStatus(membership);
-    if (membership?.status === "active" && membership.kidsAllowed >= children.length && membership.remainingPlayHours >= totalHours) membershipApplied = true;
+  if (offer?.type === "discount" && offerConditionsMet) {
+    discountAmount = round(normalSessionTotal * Number(offer.value || 0) / 100);
+  } else if (offer?.type === "flat_discount" && offerConditionsMet) {
+    discountAmount = round(Math.min(Number(offer.value || 0), normalSessionTotal));
   }
-  const sessionTotal = membershipApplied ? 0 : round(normalSessionTotal - discountAmount);
+  const sessionTotal = membershipApplied ? 0 : round(Math.max(normalSessionTotal - discountAmount, 0));
   const cafeItems = (kots || []).flatMap((kot) => (kot.items || []).map((item) => ({ name: item.name || "", quantity: Number(item.quantity || 1), unitPrice: Number(item.price || 0), lineTotal: Number(item.total || 0) })));
   const cafeSubtotal = round(cafeItems.reduce((sum, item) => sum + item.lineTotal, 0));
   const cafeGST = round(cafeSubtotal * 0.05);
   const cafeTotal = round(cafeSubtotal + cafeGST);
   const membershipPurchase = session.membershipPurchase || null;
   const membershipPurchaseTotal = Number(membershipPurchase?.price || 0);
-  const grandTotal = round(sessionTotal + cafeTotal + membershipPurchaseTotal);
-  return { totalHours, extensionHours, childCharges, cafeItems, normalSessionTotal, sessionTotal, cafeSubtotal, cafeGST, cafeTotal, grandTotal, discountAmount, membershipApplied, membership, specialPricingApplied, offer: offer ? { name: offer.name, type: offer.type, value: offer.value } : null, membershipPurchase };
+  const socksQty = children.filter((child) => child.socksOpted).length;
+  const socksRate = Number(settings?.socksCost || 0);
+  const socksTotal = round(socksQty * socksRate);
+  const grandTotal = round(sessionTotal + cafeTotal + membershipPurchaseTotal + socksTotal);
+  return { totalHours, extensionHours, childCharges, cafeItems, normalSessionTotal, sessionTotal, cafeSubtotal, cafeGST, cafeTotal, grandTotal, discountAmount, membershipApplied, membership, specialPricingApplied, offer: offer ? { name: offer.name, type: offer.type, value: offer.value } : null, membershipPurchase, socksQty, socksRate, socksTotal };
 };
 
 module.exports = { calculateInvoiceCharges, round };

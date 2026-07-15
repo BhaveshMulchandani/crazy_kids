@@ -10,6 +10,8 @@ const caferoutes = require('./routes/cafe.routes')
 const invoiceroutes = require('./routes/invoice.routes')
 const membershiproutes = require('./routes/membership.routes')
 const adminroutes = require('./routes/admin.routes')
+const notificationroutes = require('./routes/notification.routes')
+const { startOverdueSessionWatcher } = require('./services/notification.service')
 const cors = require('cors');
 const cookieParser = require("cookie-parser");
 
@@ -33,7 +35,9 @@ app.use('/cafe', caferoutes)
 app.use('/invoice', invoiceroutes)
 app.use('/memberships', membershiproutes)
 app.use('/admin', adminroutes)
+app.use('/notifications', notificationroutes)
 
 app.listen(3000, () => {
   console.log("server is running on port 3000")
+  startOverdueSessionWatcher();
 })

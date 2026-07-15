@@ -12,6 +12,8 @@ router.patch('/pause/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessio
 router.patch('/extend/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.extendsession)
 router.patch('/resume/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.resumesession)
 router.patch("/complete/:id",authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.completesession);
+router.patch('/pause-child/:id/:index',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.pauseChild)
+router.patch('/resume-child/:id/:index',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.resumeChild)
 
 
 module.exports = router

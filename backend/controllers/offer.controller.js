@@ -13,6 +13,7 @@ const createOffer = async (req, res) => {
     const allowedTypes = [
       "membership",
       "discount",
+      "flat_discount",
       "special_pricing",
     ];
 
@@ -39,6 +40,14 @@ const createOffer = async (req, res) => {
       if (!value || !rules?.minKids) {
         return res.status(400).json({
           message: "Discount percentage and minimum kids are required",
+        });
+      }
+    }
+
+    if (type === "flat_discount") {
+      if (!value || !rules?.minKids) {
+        return res.status(400).json({
+          message: "Discount amount and minimum kids are required",
         });
       }
     }

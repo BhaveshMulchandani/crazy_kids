@@ -20,6 +20,8 @@ const invoiceSchema = new mongoose.Schema(
       mobileNumber: { type: String, default: "" },
       bandNumber: { type: String, default: "" },
       sessionNumber: { type: String, default: "" },
+      gender: { type: String, default: "" },
+      city: { type: String, default: "" },
     },
 
     children: [
@@ -31,6 +33,7 @@ const invoiceSchema = new mongoose.Schema(
         extensionHours: { type: Number, default: 0 },
         extensionRate: { type: Number, default: 0 },
         childTotal: { type: Number, default: 0 },
+        socksOpted: { type: Boolean, default: false },
       },
     ],
 
@@ -62,6 +65,9 @@ const invoiceSchema = new mongoose.Schema(
       normalSessionTotal: { type: Number, default: 0 },
       discountAmount: { type: Number, default: 0 },
       membershipPurchaseTotal: { type: Number, default: 0 },
+      socksQty: { type: Number, default: 0 },
+      socksRate: { type: Number, default: 0 },
+      socksTotal: { type: Number, default: 0 },
     },
 
     offer: {

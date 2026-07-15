@@ -42,6 +42,7 @@ const PriceSetting = require('../models/price.model');
 const Membership = require('../models/membership.model');
 const { createMembership, refreshStatus } = require('./membership.controller');
 const { calculateInvoiceCharges } = require('../services/billing.service');
+const Notification = require('../models/notification.model');
 
 const membershipChildKey = (child) => `${String(child.name || "").trim().toLowerCase()}|${new Date(child.dob).toISOString().slice(0, 10)}`;
 
@@ -53,6 +54,8 @@ const createsession = async (
     const {
       parentName,
       mobileNumber,
+      gender,
+      city,
       bandNumber,
       children,
       offer,
@@ -110,6 +113,7 @@ const createsession = async (
           age: calculateAge(
             child.dob
           ),
+          socksOpted: Boolean(child.socksOpted),
         };
       });
 
@@ -151,6 +155,12 @@ const createsession = async (
 
         mobileNumber:
           mobileNumber.trim(),
+
+        gender:
+          gender?.trim() || "",
+
+        city:
+          city?.trim() || "",
 
         bandNumber:
           bandNumber?.trim() || "",
@@ -269,6 +279,13 @@ const startsession = async (req, res) => {
       session.totalHours * 60 * 60 * 1000
     );
 
+    session.children.forEach((child) => {
+      child.timer.status = "running";
+      child.timer.scheduledEndTime = session.scheduledEndTime;
+      child.timer.pauseHistory = [];
+      child.timer.totalPausedMinutes = 0;
+    });
+
     session.status = "running";
 
     await session.save();
@@ -302,8 +319,20 @@ const pausesession = async (req, res) => {
       });
     }
 
+    const pausedAt = new Date();
+
     session.pauseHistory.push({
-      pausedAt: new Date(),
+      pausedAt,
+    });
+
+    // Cascade to every child that isn't already individually paused —
+    // a main pause must pause everyone, but a child already paused on
+    // their own keeps their own pause entry (no double-pausing).
+    session.children.forEach((child) => {
+      if (child.timer.status === "running") {
+        child.timer.pauseHistory.push({ pausedAt });
+        child.timer.status = "paused";
+      }
     });
 
     session.status = "paused";
@@ -367,6 +396,23 @@ const resumesession = async (req, res) => {
       pausedMinutes * 60 * 1000
     );
 
+    // Main resume brings every child back, even one that was paused
+    // individually before the main pause kicked in.
+    session.children.forEach((child) => {
+      if (child.timer.status === "paused") {
+        const childLastPause = child.timer.pauseHistory[child.timer.pauseHistory.length - 1];
+        if (childLastPause && !childLastPause.resumedAt) {
+          childLastPause.resumedAt = resumedAt;
+          const childPausedMinutes = Math.ceil((resumedAt - childLastPause.pausedAt) / (1000 * 60));
+          child.timer.totalPausedMinutes += childPausedMinutes;
+          if (child.timer.scheduledEndTime) {
+            child.timer.scheduledEndTime = new Date(child.timer.scheduledEndTime.getTime() + childPausedMinutes * 60 * 1000);
+          }
+        }
+        child.timer.status = "running";
+      }
+    });
+
     session.status = "running";
 
     await session.save();
@@ -379,6 +425,96 @@ const resumesession = async (req, res) => {
     return res.status(500).json({
       message: error.message,
     });
+  }
+};
+
+const pauseChild = async (req, res) => {
+  try {
+    const { id, index } = req.params;
+    const childIndex = Number(index);
+
+    const session = await sessionmodel.findById(id);
+
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    if (session.status !== "running") {
+      return res.status(400).json({ message: "Only children in a running session can be paused" });
+    }
+
+    const child = session.children[childIndex];
+    if (!child) {
+      return res.status(404).json({ message: "Child not found" });
+    }
+
+    if (child.timer.status !== "running") {
+      return res.status(400).json({ message: "Child is not running" });
+    }
+
+    child.timer.pauseHistory.push({ pausedAt: new Date() });
+    child.timer.status = "paused";
+
+    await session.save();
+
+    return res.status(200).json({
+      message: "Child paused successfully",
+      session,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+const resumeChild = async (req, res) => {
+  try {
+    const { id, index } = req.params;
+    const childIndex = Number(index);
+
+    const session = await sessionmodel.findById(id);
+
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    if (session.status !== "running") {
+      return res.status(400).json({ message: "Only children in a running session can be resumed" });
+    }
+
+    const child = session.children[childIndex];
+    if (!child) {
+      return res.status(404).json({ message: "Child not found" });
+    }
+
+    if (child.timer.status !== "paused") {
+      return res.status(400).json({ message: "Child is not paused" });
+    }
+
+    const lastPause = child.timer.pauseHistory[child.timer.pauseHistory.length - 1];
+    if (!lastPause || !lastPause.pausedAt) {
+      return res.status(400).json({ message: "Invalid pause history" });
+    }
+
+    const resumedAt = new Date();
+    lastPause.resumedAt = resumedAt;
+
+    const pausedMinutes = Math.ceil((resumedAt - lastPause.pausedAt) / (1000 * 60));
+    child.timer.totalPausedMinutes += pausedMinutes;
+
+    if (child.timer.scheduledEndTime) {
+      child.timer.scheduledEndTime = new Date(child.timer.scheduledEndTime.getTime() + pausedMinutes * 60 * 1000);
+    }
+
+    child.timer.status = "running";
+
+    await session.save();
+
+    return res.status(200).json({
+      message: "Child resumed successfully",
+      session,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 
@@ -417,7 +553,23 @@ const extendsession = async (req, res) => {
       60 * 60 * 1000
     );
 
+    session.children.forEach((child) => {
+      if (child.timer.scheduledEndTime) {
+        child.timer.scheduledEndTime = new Date(child.timer.scheduledEndTime.getTime() + 60 * 60 * 1000);
+      }
+    });
+
+    // The session is no longer overdue now that its end time has moved
+    // forward — allow the watcher to notify again if it becomes overdue
+    // later, and clear any "waiting for checkout" notification already
+    // raised for it.
+    session.overdueNotified = false;
+
     await session.save();
+    await Notification.updateMany(
+      { session: session._id, resolved: false },
+      { resolved: true, read: true }
+    );
 
     return res.status(200).json({
       message: "Session extended by 1 hour",
@@ -451,6 +603,10 @@ const completesession = async (req, res) => {
     session.status = "completed";
     session.actualEndTime = new Date();
     await session.save();
+    await Notification.updateMany(
+      { session: session._id, resolved: false },
+      { resolved: true, read: true }
+    );
 
     const existingInvoice = await Invoice.findOne({ session: id });
     if (!existingInvoice) {
@@ -470,11 +626,11 @@ const completesession = async (req, res) => {
       const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
       const loyaltyPoints = Math.floor(calculation.grandTotal / 100) * pointsPer100;
       await Invoice.create({ invoiceNumber: `INV-${Date.now()}`, session: session._id,
-        customer: { parentName: session.parentName, mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber },
+        customer: { parentName: session.parentName, mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber, gender: session.gender || "", city: session.city || "" },
         children: calculation.childCharges,
         sessionDetails: { startTime: session.startTime, endTime: session.actualEndTime, actualDurationMinutes, totalHours: calculation.totalHours, extensionHours: calculation.extensionHours, pauseTimeMinutes: session.totalPausedMinutes || 0 },
         cafeItems: calculation.cafeItems,
-        charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0) },
+        charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0), socksQty: calculation.socksQty, socksRate: calculation.socksRate, socksTotal: calculation.socksTotal },
         offer: { name: calculation.offer?.name || "", type: calculation.offer?.type || "", discountAmount: calculation.discountAmount, specialPricingApplied: calculation.specialPricingApplied },
         membership: { applied: calculation.membershipApplied, membership: calculation.membership?._id || null, planName: calculation.membership?.planName || "", hoursConsumed: calculation.membershipApplied ? calculation.totalHours : 0, hoursBeforeSession: calculation.membershipApplied ? hoursBeforeSession : 0, remainingHours: calculation.membershipApplied ? calculation.membership.remainingPlayHours : 0, expiryDate: calculation.membershipApplied ? calculation.membership.expiryDate : null, purchase: { planName: calculation.membershipPurchase?.planName || "", price: Number(calculation.membershipPurchase?.price || 0) } },
         payment: { status: session.paymentStatus || "pending", breakdown: session.paymentBreakdown || [], amountPaid: Number(session.amountPaid || 0), pendingAmount: Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0) },
@@ -578,7 +734,7 @@ const searchBillingCustomer = async (req, res) => {
           }
         ],
       })
-      .select("_id sessionNumber parentName mobileNumber bandNumber children reference notes createdAt")
+      .select("_id sessionNumber parentName mobileNumber gender city bandNumber children reference notes createdAt")
       .sort({ createdAt: -1 });
 
     const mobileNumbers = [...new Set(matches.map((session) => session.mobileNumber))];
@@ -618,5 +774,5 @@ const searchBillingCustomer = async (req, res) => {
 
 
 module.exports = {
-  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, runningsession, getSessionKOTs
+  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, runningsession, getSessionKOTs, pauseChild, resumeChild
 };

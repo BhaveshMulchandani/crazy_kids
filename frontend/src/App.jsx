@@ -10,6 +10,7 @@ import Customers from "./pages/Admin/Customers";
 import Offers from "./pages/Admin/Offers";
 import Whatsapp from "./pages/Admin/Whatsapp";
 import Settings from "./pages/Admin/Settings";
+import MonthlyReports from "./pages/Admin/MonthlyReports";
 import Cafemenu from "./pages/Desk/Cafemenu";
 import Runningbills from "./pages/Desk/Runningbills"
 
@@ -24,6 +25,7 @@ const App = () => {
       <Route path="customers" element={<Customers/>}/>
       <Route path="offers" element={<Offers/>}/>
       <Route path="whatsapp" element={<Whatsapp/>}/>
+      <Route path="reports" element={<MonthlyReports/>}/>
       <Route path="settings" element={<Settings/>}/>
       </Route>
 

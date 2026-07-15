@@ -5,6 +5,7 @@ import {
   MessageCircle,
   Settings,
   Sparkles,
+  FileBarChart,
 } from "lucide-react";
 
 import { NavLink, useNavigate } from "react-router-dom";
@@ -15,6 +16,7 @@ const navItems = [
   { label: "Customers", icon: Users, path: "/admin/customers" },
   { label: "Offers", icon: Tag, path: "/admin/offers" },
   { label: "WhatsApp", icon: MessageCircle, path: "/admin/whatsapp" },
+  { label: "Monthly Reports", icon: FileBarChart, path: "/admin/reports" },
   { label: "Settings", icon: Settings, path: "/admin/settings" },
 ];
 

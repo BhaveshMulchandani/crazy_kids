@@ -19,7 +19,7 @@ import {
   Clock,
   ChevronDown,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
 // Helper functions
@@ -45,6 +45,37 @@ const formatHMS = (seconds) => {
 
 const formatCurrency = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
 
+const OFFER_TYPE_LABELS = {
+  discount: "Percentage Discount",
+  flat_discount: "Flat Amount Discount",
+  special_pricing: "Special Pricing",
+  membership: "Membership",
+};
+const offerTypeLabel = (type) => OFFER_TYPE_LABELS[type] || type || "—";
+
+// Elapsed time for one child, same math as elapsedSeconds(bill) above but
+// against the child's own timer.pauseHistory — so an individually paused
+// child freezes while the rest of the session keeps counting.
+const elapsedSecondsForChild = (bill, child) => {
+  if (!bill.startTime) return 0;
+  const start = new Date(bill.startTime);
+  const now = new Date();
+  const pausedMilliseconds = (child?.timer?.pauseHistory || []).reduce((total, pause) => {
+    if (!pause?.pausedAt) return total;
+    const pauseEnd = pause.resumedAt ? new Date(pause.resumedAt) : now;
+    return total + Math.max(0, pauseEnd.getTime() - new Date(pause.pausedAt).getTime());
+  }, 0);
+  const diff = now.getTime() - start.getTime() - pausedMilliseconds;
+  return Math.max(0, Math.floor(diff / 1000));
+};
+
+const calculateSocksCharge = (bill, pricingSettings) => {
+  const children = bill?.children ?? [];
+  const socksQty = children.filter((child) => child?.socksOpted).length;
+  const socksTotal = socksQty * Number(pricingSettings?.socksCost ?? 0);
+  return { socksQty, socksTotal };
+};
+
 const isBirthdayChild = (child) => {
   if (child?.isBirthdayToday) return true;
   if (!child?.dob) return false;
@@ -58,20 +89,42 @@ const isBirthdayChild = (child) => {
   );
 };
 
+const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+const dayName = (date) => new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
+
+// Mirrors backend/services/billing.service.js:calculateInvoiceCharges so the
+// Running Bill / Final Bill preview matches what the invoice will actually
+// charge — membership is resolved first and always wins; an offer is only
+// looked at when no membership applies, and only takes effect once its own
+// configured conditions (e.g. minKids) are satisfied.
 const calculateSessionCharge = (bill, pricingSettings) => {
-  if (bill?.membership && Number(bill.membership.remainingPlayHours || 0) >= Number(bill.totalHours || 1) && Number(bill.membership.kidsAllowed || 0) >= (bill.children?.length || 0)) {
-    return { subtotal: 0, total: 0, membershipApplied: true };
-  }
   const children = bill?.children ?? [];
+  const membershipApplied = Boolean(
+    bill?.membership &&
+      Number(bill.membership.remainingPlayHours || 0) >= Number(bill.totalHours || 1) &&
+      Number(bill.membership.kidsAllowed || 0) >= children.length,
+  );
+
+  if (membershipApplied) {
+    return { subtotal: 0, total: 0, membershipApplied: true, discountAmount: 0, offer: null };
+  }
+
+  const offer = bill?.offer?.active === false ? null : bill?.offer || null;
+  const specialDayMatches =
+    offer?.type === "special_pricing" &&
+    String(offer.rules?.day || "").toLowerCase() === dayName(new Date()).toLowerCase();
+
   const subtotal = children.reduce((total, child) => {
     const age = child?.age ?? 0;
     const isUnder3 = age < 3;
-    const firstHourRate = isUnder3
+    const normalFirst = isUnder3
       ? Number(pricingSettings?.firstHourUnder3 ?? 0)
       : Number(pricingSettings?.firstHourAbove3 ?? 0);
-    const extensionRate = isUnder3
+    const normalExtension = isUnder3
       ? Number(pricingSettings?.extensionUnder3 ?? 0)
       : Number(pricingSettings?.extensionAbove3 ?? 0);
+    const firstHourRate = specialDayMatches ? Number(offer.rules?.firstHourPrice || 0) : normalFirst;
+    const extensionRate = specialDayMatches ? Number(offer.rules?.nextHourPrice || 0) : normalExtension;
     return (
       total +
       firstHourRate +
@@ -79,10 +132,20 @@ const calculateSessionCharge = (bill, pricingSettings) => {
     );
   }, 0);
 
+  const offerConditionsMet = offer && children.length >= Number(offer.rules?.minKids || Infinity);
+  let discountAmount = 0;
+  if (offer?.type === "discount" && offerConditionsMet) {
+    discountAmount = round2((subtotal * Number(offer.value || 0)) / 100);
+  } else if (offer?.type === "flat_discount" && offerConditionsMet) {
+    discountAmount = round2(Math.min(Number(offer.value || 0), subtotal));
+  }
+
   return {
     subtotal,
-    total: subtotal,
+    total: round2(Math.max(subtotal - discountAmount, 0)),
     membershipApplied: false,
+    discountAmount,
+    offer: discountAmount > 0 || specialDayMatches ? offer : null,
   };
 };
 
@@ -378,8 +441,11 @@ const BillCard = ({
   onCheckout,
   onStart,
   onExtend,
+  onPauseChild,
+  onResumeChild,
   pricingSettings,
   kotsBySession,
+  highlighted,
 }) => {
   const secs = elapsedSeconds(bill);
   const children = bill.children ?? [];
@@ -391,7 +457,8 @@ const BillCard = ({
     ...bill,
     kots: kotsBySession?.[bill._id] || [],
   });
-  const total = sessionCharge.total + foodCharge.total;
+  const socksCharge = calculateSocksCharge(bill, pricingSettings);
+  const total = sessionCharge.total + foodCharge.total + socksCharge.socksTotal;
   const paymentSummary = getSessionPaymentSummary(bill, sessionCharge);
 
   const isOverdue = Boolean(
@@ -412,9 +479,12 @@ const BillCard = ({
 
   return (
     <div
+      id={`bill-${bill._id}`}
       className={`surface-card p-5 transition-all ${
         paused ? "ring-2 ring-amber-400/60" : ""
-      } ${hasBirthday ? "ring-2 ring-pink-500 bg-pink-50" : ""}`}
+      } ${hasBirthday ? "ring-2 ring-pink-500 bg-pink-50" : ""} ${
+        highlighted ? "ring-2 ring-blue-500 ring-offset-2" : ""
+      }`}
     >
       <div className="flex items-start justify-between">
         <div className="min-w-0">
@@ -464,19 +534,55 @@ const BillCard = ({
         </span>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-3 space-y-1.5">
         {children.map((c, i) => {
           const isBirthday = isBirthdayChild(c);
+          const timer = c.timer || {};
+          const childPaused = timer.status === "paused";
+          const childStarted = bill.status === "running" || bill.status === "paused";
+          const childSecs = childStarted ? elapsedSecondsForChild(bill, c) : 0;
+
           return (
-            <span
+            <div
               key={i}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${
+              className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs ${
                 isBirthday ? "bg-pink-600 text-white" : "bg-secondary"
               }`}
             >
-              {isBirthday ? "🎂" : <Baby className="h-3 w-3" />}
-              {c.name} · {c.age}y
-            </span>
+              <span className="flex min-w-0 items-center gap-1">
+                {isBirthday ? "🎂" : <Baby className="h-3 w-3 shrink-0" />}
+                <span className="truncate">
+                  {c.name} · {c.age}y
+                </span>
+                {c.socksOpted && <span title="Socks opted">🧦</span>}
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5">
+                {childStarted && (
+                  <span
+                    className={`font-mono tabular-nums ${childPaused ? "opacity-70" : ""}`}
+                    title={childPaused ? "Paused" : "Running"}
+                  >
+                    {formatHMS(childSecs)}
+                  </span>
+                )}
+                {bill.status === "running" && (onPauseChild || onResumeChild) && (
+                  <button
+                    type="button"
+                    title={childPaused ? "Resume child" : "Pause child"}
+                    onClick={() =>
+                      childPaused ? onResumeChild?.(i) : onPauseChild?.(i)
+                    }
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/30 hover:bg-white/50"
+                  >
+                    {childPaused ? (
+                      <Play className="h-3 w-3" />
+                    ) : (
+                      <Pause className="h-3 w-3" />
+                    )}
+                  </button>
+                )}
+              </span>
+            </div>
           );
         })}
       </div>
@@ -519,6 +625,32 @@ const BillCard = ({
             {formatCurrency(sessionCharge.total)}
           </span>
         </div>
+        {sessionCharge.membershipApplied && (
+          <div className="mt-1 flex items-center justify-between">
+            <span>Membership</span>
+            <span className="font-semibold text-foreground">Applied</span>
+          </div>
+        )}
+        {!sessionCharge.membershipApplied && sessionCharge.offer && (
+          <div className="mt-1 flex items-center justify-between">
+            <span>
+              Offer — {sessionCharge.offer.name} ({offerTypeLabel(sessionCharge.offer.type)})
+            </span>
+            <span className="font-semibold text-foreground">
+              {sessionCharge.discountAmount > 0 ? `-${formatCurrency(sessionCharge.discountAmount)}` : "Applied"}
+            </span>
+          </div>
+        )}
+        {socksCharge.socksQty > 0 && (
+          <div className="mt-1 flex items-center justify-between">
+            <span>
+              Socks ({socksCharge.socksQty} × {formatCurrency(pricingSettings?.socksCost ?? 0)})
+            </span>
+            <span className="font-semibold text-foreground">
+              {formatCurrency(socksCharge.socksTotal)}
+            </span>
+          </div>
+        )}
         <div className="mt-1 flex items-center justify-between">
           <span>Amount Paid</span>
           <span className="font-semibold text-foreground">
@@ -633,7 +765,8 @@ const CheckoutDialog = ({
     ...bill,
     kots: kotsBySession?.[bill?._id] || [],
   });
-  const total = sessionCharge.total + foodCharge.total;
+  const socksCharge = calculateSocksCharge(bill, pricingSettings);
+  const total = sessionCharge.total + foodCharge.total + socksCharge.socksTotal;
   const paymentSummary = getSessionPaymentSummary(bill, { total });
   const loyaltyPoints = calculateLoyaltyPoints(total, pricingSettings);
 
@@ -681,6 +814,18 @@ const CheckoutDialog = ({
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <Row k="Session Total" v={formatCurrency(sessionCharge.total)} />
+          {sessionCharge.membershipApplied && (
+            <Row k="Membership" v="Applied" />
+          )}
+          {!sessionCharge.membershipApplied && sessionCharge.offer && (
+            <>
+              <Row k="Offer Name" v={sessionCharge.offer.name} />
+              <Row k="Offer Type" v={offerTypeLabel(sessionCharge.offer.type)} />
+              {sessionCharge.discountAmount > 0 && (
+                <Row k="Discount Amount" v={`-${formatCurrency(sessionCharge.discountAmount)}`} />
+              )}
+            </>
+          )}
           {bill.children?.map((c, i) => (
             <div key={i} className="text-xs text-muted-foreground pl-3">
               ↳ {c.name} ({c.age}y):{" "}
@@ -690,6 +835,12 @@ const CheckoutDialog = ({
             </div>
           ))}
           <Row k="Cafe items" v={formatCurrency(foodCharge.total)} />
+          {socksCharge.socksQty > 0 && (
+            <Row
+              k={`Socks (${socksCharge.socksQty} × ${formatCurrency(pricingSettings?.socksCost ?? 0)})`}
+              v={formatCurrency(socksCharge.socksTotal)}
+            />
+          )}
           <div className="h-px bg-border" />
           <div className="space-y-1.5">
             <Label className="text-xs">Extra discount (₹)</Label>
@@ -709,7 +860,7 @@ const CheckoutDialog = ({
             />
           </div>
           <div className="flex justify-between items-baseline pt-1">
-            <span className="text-muted-foreground">Final total</span>
+            <span className="text-muted-foreground">Final Amount</span>
             <span className="text-3xl font-semibold gradient-text">
               {formatCurrency(total)}
             </span>
@@ -802,6 +953,11 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             <div>
               <b>Session:</b> {customer.sessionNumber || invoice.sessionNumber || "—"}
             </div>
+            {customer.city && (
+              <div>
+                <b>City:</b> {customer.city}
+              </div>
+            )}
             <div>
               <b>Payment:</b>{" "}
               {payment.status === "paid"
@@ -820,6 +976,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
                 <th>Age</th>
                 <th>First Hour</th>
                 <th>Extension</th>
+                <th>Socks</th>
                 <th style={{ textAlign: "right" }}>Total</th>
               </tr>
             </thead>
@@ -831,6 +988,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
                   <td>{c.age}y</td>
                   <td>{formatCurrency(c.firstHourCharge || 0)}</td>
                   <td>{c.extensionHours ? `${c.extensionHours}h × ${formatCurrency(c.extensionRate || 0)}` : "—"}</td>
+                  <td>{c.socksOpted ? "Yes" : "—"}</td>
                   <td style={{ textAlign: "right" }}>{formatCurrency(c.childTotal || 0)}</td>
                 </tr>
               ))}
@@ -872,6 +1030,13 @@ const InvoiceDialog = ({ invoice, onClose }) => {
                   <td style={{ textAlign: "right" }}>{formatCurrency(item.lineTotal || 0)}</td>
                 </tr>
               ))}
+              {charges?.socksQty > 0 && (
+                <tr>
+                  <td>Socks</td>
+                  <td>{charges.socksQty}</td>
+                  <td style={{ textAlign: "right" }}>{formatCurrency(charges.socksTotal || 0)}</td>
+                </tr>
+              )}
             </tbody>
           </table>
 
@@ -894,7 +1059,13 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               <div className="row"><span>Remaining Membership Hours</span><span>{invoice.membership.remainingHours}h</span></div>
               <div className="row"><span>Membership Expiry Date</span><span>{invoice.membership.expiryDate ? new Date(invoice.membership.expiryDate).toLocaleDateString() : "—"}</span></div>
             </>}
-            {charges?.discountAmount > 0 && <div className="row"><span>Offer Discount</span><span>-{formatCurrency(charges.discountAmount)}</span></div>}
+            {!invoice.membership?.applied && invoice.offer?.name && (
+              <>
+                <div className="row"><span>Offer Name</span><span>{invoice.offer.name}</span></div>
+                <div className="row"><span>Offer Type</span><span>{offerTypeLabel(invoice.offer.type)}</span></div>
+              </>
+            )}
+            {charges?.discountAmount > 0 && <div className="row"><span>Discount Amount</span><span>-{formatCurrency(charges.discountAmount)}</span></div>}
             {charges?.membershipPurchaseTotal > 0 && <div className="row"><span>Membership Purchase</span><span>{formatCurrency(charges.membershipPurchaseTotal)}</span></div>}
             <div className="row">
               <span>Cafe Subtotal</span>
@@ -908,6 +1079,12 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               <span>Cafe Total</span>
               <span>{formatCurrency(charges?.cafeTotal || 0)}</span>
             </div>
+            {charges?.socksQty > 0 && (
+              <div className="row">
+                <span>Socks ({charges.socksQty} × {formatCurrency(charges.socksRate || 0)})</span>
+                <span>{formatCurrency(charges.socksTotal || 0)}</span>
+              </div>
+            )}
             <div className="row">
               <span>Amount Paid</span>
               <span>{formatCurrency(paymentSummary.amountPaid)}</span>
@@ -925,7 +1102,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               <span>{loyaltyPoints}</span>
             </div>
             <div className="row bold" style={{ fontSize: 18, marginTop: 6 }}>
-              <span>GRAND TOTAL</span>
+              <span>FINAL AMOUNT (GRAND TOTAL)</span>
               <span>{formatCurrency(charges?.grandTotal || 0)}</span>
             </div>
           </div>
@@ -963,6 +1140,8 @@ function SessionsPage() {
   const [bills, setBills] = useState([]);
   const [pricingSettings, setPricingSettings] = useState(null);
   const [kotsBySession, setKotsBySession] = useState({});
+  const [searchParams, setSearchParams] = useSearchParams();
+  const highlightId = searchParams.get("highlight");
 
   useEffect(() => {
     const t = setInterval(() => force((n) => n + 1), 1000);
@@ -1035,6 +1214,23 @@ function SessionsPage() {
     loadSessions();
   }, [loadSessions]);
 
+  // Deep-linked from a "session waiting for checkout" notification —
+  // scroll the matching card into view and briefly highlight it.
+  useEffect(() => {
+    if (!highlightId || bills.length === 0) return;
+
+    const el = document.getElementById(`bill-${highlightId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    const timeout = setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      next.delete("highlight");
+      setSearchParams(next, { replace: true });
+    }, 5000);
+
+    return () => clearTimeout(timeout);
+  }, [highlightId, bills.length]);
+
   const booked = bills.filter((b) => b.status === "booked");
   const running = bills.filter(
     (b) => b.status === "running" || b.status === "paused",
@@ -1068,6 +1264,32 @@ function SessionsPage() {
     } catch (error) {
       console.log(error);
       toast.error(error.response?.data?.message || "Failed to resume session");
+    }
+  };
+
+  const pauseChild = async (b, index) => {
+    try {
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/session/pause-child/${b._id}/${index}`,
+        {},
+        { withCredentials: true },
+      );
+      await loadSessions();
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to pause child");
+    }
+  };
+
+  const resumeChild = async (b, index) => {
+    try {
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/session/resume-child/${b._id}/${index}`,
+        {},
+        { withCredentials: true },
+      );
+      await loadSessions();
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to resume child");
     }
   };
 
@@ -1187,8 +1409,11 @@ function SessionsPage() {
                 onCheckout={() => checkout(b)}
                 onStart={() => startSession(b)}
                 onExtend={() => extendHour(b)}
+                onPauseChild={(index) => pauseChild(b, index)}
+                onResumeChild={(index) => resumeChild(b, index)}
                 pricingSettings={pricingSettings}
                 kotsBySession={kotsBySession}
+                highlighted={b._id === highlightId}
               />
             ))}
           </div>
@@ -1220,8 +1445,11 @@ function SessionsPage() {
                 onCheckout={() => checkout(b)}
                 onStart={() => startSession(b)}
                 onExtend={() => extendHour(b)}
+                onPauseChild={(index) => pauseChild(b, index)}
+                onResumeChild={(index) => resumeChild(b, index)}
                 pricingSettings={pricingSettings}
                 kotsBySession={kotsBySession}
+                highlighted={b._id === highlightId}
               />
             ))}
           </div>

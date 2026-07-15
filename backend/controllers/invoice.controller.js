@@ -40,6 +40,7 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
       extensionHours: Math.max(totalHours - 1, 0),
       extensionRate,
       childTotal,
+      socksOpted: Boolean(child?.socksOpted),
     };
   });
 
@@ -53,7 +54,10 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
   const cafeSubtotal = cafeItems.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0);
   const cafeGST = Math.round(cafeSubtotal * 0.05 * 100) / 100;
   const cafeTotal = cafeSubtotal + cafeGST;
-  const grandTotal = sessionTotal + cafeTotal;
+  const socksQty = children.filter((child) => child?.socksOpted).length;
+  const socksRate = Number(settings?.socksCost || 0);
+  const socksTotal = socksQty * socksRate;
+  const grandTotal = sessionTotal + cafeTotal + socksTotal;
   const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
   const loyaltyPoints = Math.floor(Number(grandTotal || 0) / 100) * pointsPer100;
 
@@ -63,6 +67,8 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
       mobileNumber: session.mobileNumber || "",
       bandNumber: session.bandNumber || "",
       sessionNumber: session.sessionNumber || "",
+      gender: session.gender || "",
+      city: session.city || "",
     },
     children: childCharges,
     sessionDetails: {
@@ -81,6 +87,9 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
       cafeTotal,
       grandTotal,
       loyaltyPoints,
+      socksQty,
+      socksRate,
+      socksTotal,
     },
     payment: {
       status: session.paymentStatus || "pending",

@@ -1,5 +1,33 @@
 const mongoose = require("mongoose");
 
+const childTimerSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ["running", "paused"],
+      default: "running",
+    },
+
+    scheduledEndTime: {
+      type: Date,
+      default: null,
+    },
+
+    pauseHistory: [
+      {
+        pausedAt: Date,
+        resumedAt: Date,
+      },
+    ],
+
+    totalPausedMinutes: {
+      type: Number,
+      default: 0,
+    },
+  },
+  { _id: false }
+);
+
 const childSchema = new mongoose.Schema(
   {
     name: {
@@ -17,6 +45,16 @@ const childSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 0,
+    },
+
+    socksOpted: {
+      type: Boolean,
+      default: false,
+    },
+
+    timer: {
+      type: childTimerSchema,
+      default: () => ({}),
     },
   },
   { _id: false }
@@ -57,6 +95,18 @@ const sessionSchema = new mongoose.Schema(
       required: true,
       trim: true,
       index: true,
+    },
+
+    gender: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    city: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     bandNumber: {
@@ -204,6 +254,15 @@ const sessionSchema = new mongoose.Schema(
     totalPausedMinutes: {
       type: Number,
       default: 0,
+    },
+
+    // Set once an "session ended, waiting for checkout" notification has
+    // been raised for this session, so the overdue watcher never raises a
+    // second one for the same session. Reset on extend, since the session
+    // is no longer overdue once its scheduled end time moves forward.
+    overdueNotified: {
+      type: Boolean,
+      default: false,
     },
   },
   {
