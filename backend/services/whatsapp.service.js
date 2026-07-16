@@ -67,13 +67,11 @@ const sendInvoice = async ({ destination, userName, invoiceNumber, grandTotal, r
     },
   };
 
-  // Never log apiKey — log everything else about the outgoing request.
-  console.log("[whatsapp.service] sending invoice", {
-    campaignName,
-    destination: formattedDestination,
-    invoiceNumber,
-    mediaUrl,
-  });
+  // Log the exact outgoing JSON payload for debugging — apiKey omitted,
+  // every other field (including templateParams/media) logged as-is so a
+  // TrdAI rejection can be diagnosed from what we actually sent.
+  const { apiKey: _apiKey, ...payloadForLogging } = payload;
+  console.log("[whatsapp.service] request payload (apiKey omitted):", JSON.stringify(payloadForLogging));
 
   let response;
   let body;
