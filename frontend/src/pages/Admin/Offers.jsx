@@ -191,7 +191,7 @@ const DialogContent = React.forwardRef(({ open, onOpenChange, className, childre
       <div className="fixed inset-0 bg-black/50" onClick={() => onOpenChange?.(false)} />
       <div
         ref={ref}
-        className={cn("relative z-10 w-full max-w-lg overflow-hidden rounded-3xl border bg-background p-6 shadow-2xl", className)}
+        className={cn("relative z-10 flex max-h-[85vh] w-full max-w-[900px] flex-col overflow-hidden rounded-3xl border bg-background shadow-2xl", className)}
         onClick={(event) => event.stopPropagation()}
         {...props}
       >
@@ -203,7 +203,7 @@ const DialogContent = React.forwardRef(({ open, onOpenChange, className, childre
 DialogContent.displayName = "DialogContent";
 
 const DialogHeader = ({ className, ...props }) => (
-  <div className={cn("flex flex-col gap-1 text-center sm:text-left", className)} {...props} />
+  <div className={cn("flex flex-col gap-1 px-6 pt-6 text-center sm:text-left", className)} {...props} />
 );
 DialogHeader.displayName = "DialogHeader";
 
@@ -213,7 +213,7 @@ const DialogTitle = React.forwardRef(({ className, ...props }, ref) => (
 DialogTitle.displayName = "DialogTitle";
 
 const DialogFooter = ({ className, ...props }) => (
-  <div className={cn("mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end sm:items-center sm:gap-2", className)} {...props} />
+  <div className={cn("flex flex-col-reverse gap-3 border-t border-border/60 px-6 py-4 sm:flex-row sm:items-center sm:justify-end sm:gap-2", className)} {...props} />
 );
 DialogFooter.displayName = "DialogFooter";
 
@@ -261,18 +261,21 @@ const offerTypeOptions = [
   { value: "special_pricing", label: "Special Pricing" },
 ];
 
-const MembershipFields = ({ value, rules, setValue, setRules }) => (
+const MembershipFields = ({ value, rules, setValue, setRules, typeSelect }) => (
   <div className="space-y-4">
-    <div>
-      <Label>Membership Price (₹)</Label>
-      <Input
-        type="number"
-        value={value}
-        onChange={(event) => setValue(Number(event.target.value))}
-        placeholder="4500"
-      />
+    <div className="grid gap-4 sm:grid-cols-2">
+      {typeSelect}
+      <div>
+        <Label>Membership Price (₹)</Label>
+        <Input
+          type="number"
+          value={value}
+          onChange={(event) => setValue(Number(event.target.value))}
+          placeholder="4500"
+        />
+      </div>
     </div>
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-3">
       <div>
         <Label>Kids Allowed</Label>
         <Input
@@ -291,8 +294,6 @@ const MembershipFields = ({ value, rules, setValue, setRules }) => (
           placeholder="12"
         />
       </div>
-    </div>
-    <div className="grid gap-3 sm:grid-cols-2">
       <div>
         <Label>Bonus Hours</Label>
         <Input
@@ -302,6 +303,8 @@ const MembershipFields = ({ value, rules, setValue, setRules }) => (
           placeholder="0"
         />
       </div>
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2">
       <div>
         <Label>Validity (Months)</Label>
         <Input
@@ -312,7 +315,7 @@ const MembershipFields = ({ value, rules, setValue, setRules }) => (
         />
       </div>
     </div>
-    <div className="space-y-2 rounded-xl border border-input bg-muted/20 p-4">
+    <div className="space-y-2 rounded-xl border border-input bg-muted/20 p-3">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium">Benefits</span>
         <Button
@@ -324,10 +327,11 @@ const MembershipFields = ({ value, rules, setValue, setRules }) => (
           Add Benefit
         </Button>
       </div>
-      <div className="space-y-3">
+      <div className="space-y-2">
         {(rules.benefits || []).map((benefit, index) => (
           <div key={index} className="flex items-center gap-2">
             <Input
+              className="h-9"
               value={benefit}
               onChange={(event) => {
                 const nextBenefits = [...rules.benefits];
@@ -340,14 +344,14 @@ const MembershipFields = ({ value, rules, setValue, setRules }) => (
               type="button"
               variant="ghost"
               size="icon"
-              className="text-destructive"
+              className="h-8 w-8 text-destructive"
               onClick={() => {
                 const nextBenefits = [...rules.benefits];
                 nextBenefits.splice(index, 1);
                 setRules({ ...rules, benefits: nextBenefits });
               }}
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
         ))}
@@ -356,63 +360,76 @@ const MembershipFields = ({ value, rules, setValue, setRules }) => (
   </div>
 );
 
-const DiscountFields = ({ value, rules, setValue, setRules }) => (
-  <div className="grid gap-3 sm:grid-cols-2">
-    <div>
-      <Label>Discount Percentage</Label>
-      <Input
-        type="number"
-        value={value}
-        onChange={(event) => setValue(Number(event.target.value))}
-        placeholder="10"
-      />
-    </div>
-    <div>
-      <Label>Minimum Kids Required</Label>
-      <Input
-        type="number"
-        value={rules.minKids}
-        onChange={(event) => setRules({ ...rules, minKids: Number(event.target.value) })}
-        placeholder="5"
-      />
-    </div>
-  </div>
-);
-
-const FlatDiscountFields = ({ value, rules, setValue, setRules }) => (
-  <div className="grid gap-3 sm:grid-cols-2">
-    <div>
-      <Label>Discount Amount (₹)</Label>
-      <Input
-        type="number"
-        value={value}
-        onChange={(event) => setValue(Number(event.target.value))}
-        placeholder="100"
-      />
-    </div>
-    <div>
-      <Label>Minimum Kids Required</Label>
-      <Input
-        type="number"
-        value={rules.minKids}
-        onChange={(event) => setRules({ ...rules, minKids: Number(event.target.value) })}
-        placeholder="5"
-      />
-    </div>
-  </div>
-);
-
-const SpecialPricingFields = ({ rules, setRules }) => (
+const DiscountFields = ({ value, rules, setValue, setRules, typeSelect }) => (
   <div className="space-y-4">
-    <div>
-      <Label>Applicable Day</Label>
-      <Input
-        value={rules.day}
-        onChange={(event) => setRules({ ...rules, day: event.target.value })}
-        placeholder="Wednesday"
-      />
+    <div className="grid gap-4 sm:grid-cols-2">
+      {typeSelect}
+      <div>
+        <Label>Discount Percentage</Label>
+        <Input
+          type="number"
+          value={value}
+          onChange={(event) => setValue(Number(event.target.value))}
+          placeholder="10"
+        />
+      </div>
     </div>
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div>
+        <Label>Minimum Kids Required</Label>
+        <Input
+          type="number"
+          value={rules.minKids}
+          onChange={(event) => setRules({ ...rules, minKids: Number(event.target.value) })}
+          placeholder="5"
+        />
+      </div>
+    </div>
+  </div>
+);
+
+const FlatDiscountFields = ({ value, rules, setValue, setRules, typeSelect }) => (
+  <div className="space-y-4">
+    <div className="grid gap-4 sm:grid-cols-2">
+      {typeSelect}
+      <div>
+        <Label>Discount Amount (₹)</Label>
+        <Input
+          type="number"
+          value={value}
+          onChange={(event) => setValue(Number(event.target.value))}
+          placeholder="100"
+        />
+      </div>
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div>
+        <Label>Minimum Kids Required</Label>
+        <Input
+          type="number"
+          value={rules.minKids}
+          onChange={(event) => setRules({ ...rules, minKids: Number(event.target.value) })}
+          placeholder="5"
+        />
+      </div>
+    </div>
+  </div>
+);
+
+const SpecialPricingFields = ({ rules, setRules, typeSelect }) => (
+  <div className="space-y-4">
+    <div className="grid gap-4 sm:grid-cols-2">
+      {typeSelect}
+      <div>
+        <Label>Applicable Day</Label>
+        <Input
+          value={rules.day}
+          onChange={(event) => setRules({ ...rules, day: event.target.value })}
+          placeholder="Wednesday"
+        />
+      </div>
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2">
       <div>
         <Label>First Hour Price (₹)</Label>
         <Input
@@ -555,6 +572,24 @@ function Offers() {
     }
   };
 
+  const offerTypeSelect = (
+    <div>
+      <Label>Offer Type</Label>
+      <Select value={type} onValueChange={updateType}>
+        <SelectTrigger>
+          <SelectValue placeholder="Select type" />
+        </SelectTrigger>
+        <SelectContent className="bg-white">
+          {offerTypeOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
   return (
     <div className="space-y-6 px-6 py-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -673,43 +708,28 @@ function Offers() {
             <DialogTitle>Add new offer</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 pt-4">
-            <div>
-              <Label>Offer Name</Label>
-              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Family Membership" />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <Label>Offer Type</Label>
-                <Select  value={type} onValueChange={updateType}>
-                  <SelectTrigger >
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white">
-                    {offerTypeOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Offer Name</Label>
+                <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Family Membership" />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
               </div>
             </div>
             {type === "membership" && (
-              <MembershipFields value={value} rules={rules} setValue={setValue} setRules={setRules} />
+              <MembershipFields value={value} rules={rules} setValue={setValue} setRules={setRules} typeSelect={offerTypeSelect} />
             )}
             {type === "discount" && (
-              <DiscountFields value={value} rules={rules} setValue={setValue} setRules={setRules} />
+              <DiscountFields value={value} rules={rules} setValue={setValue} setRules={setRules} typeSelect={offerTypeSelect} />
             )}
             {type === "flat_discount" && (
-              <FlatDiscountFields value={value} rules={rules} setValue={setValue} setRules={setRules} />
+              <FlatDiscountFields value={value} rules={rules} setValue={setValue} setRules={setRules} typeSelect={offerTypeSelect} />
             )}
             {type === "special_pricing" && (
-              <SpecialPricingFields rules={rules} setRules={setRules} />
+              <SpecialPricingFields rules={rules} setRules={setRules} typeSelect={offerTypeSelect} />
             )}
           </div>
 

@@ -166,11 +166,10 @@ export default function Dashboard() {
       </div>
 
       {membershipAnalytics && <>
-        <div className="grid grid-cols-4 gap-5">
+        <div className="grid grid-cols-3 gap-5">
           <StatCard label="Memberships Sold" value={membershipAnalytics.totalSold} icon={Users} accent="oklch(0.58 0.21 260)" />
           <StatCard label="Active Memberships" value={membershipAnalytics.active} hint={`${membershipAnalytics.expired} expired`} icon={Timer} accent="oklch(0.65 0.18 145)" />
           <StatCard label="Membership Revenue" value={`₹${Number(membershipAnalytics.revenue).toLocaleString()}`} icon={IndianRupee} accent="oklch(0.78 0.17 75)" />
-          <StatCard label="Hours Consumed" value={`${membershipAnalytics.hoursConsumed}h`} hint={`${membershipAnalytics.remainingHours}h remaining`} icon={TrendingUp} accent="oklch(0.62 0.23 25)" />
         </div>
         <div className="grid grid-cols-2 gap-5">
           <div className="surface-card p-5"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p><p className="mt-1 text-sm text-muted-foreground">{membershipAnalytics.expiringSoon.length} memberships expire within 7 days.</p></div>
@@ -207,7 +206,7 @@ export default function Dashboard() {
       </div>
 
       {stats.offerAnalytics && (
-        <div className="grid grid-cols-4 gap-5">
+        <div className="grid grid-cols-3 gap-5">
           <StatCard
             label="Most Used Offer"
             value={stats.offerAnalytics.mostUsedOffer || "—"}
@@ -231,13 +230,6 @@ export default function Dashboard() {
             value={`₹${Number(stats.offerAnalytics.totalDiscountGiven).toLocaleString()}`}
             icon={IndianRupee}
             accent="oklch(0.62 0.23 25)"
-          />
-          <StatCard
-            label="Revenue Saved by Offers"
-            value={`₹${Number(stats.offerAnalytics.revenueSaved).toLocaleString()}`}
-            hint="Passed on to customers"
-            icon={TrendingUp}
-            accent="oklch(0.78 0.17 75)"
           />
         </div>
       )}

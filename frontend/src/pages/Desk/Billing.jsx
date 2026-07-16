@@ -163,9 +163,9 @@ function BillingPage() {
   const [searchResults, setSearchResults] = useState([]);
   const [parentName, setParentName] = useState("");
   const [mobile, setMobile] = useState("");
-  const [gender, setGender] = useState("");
+  const [area, setArea] = useState("");
   const [city, setCity] = useState("");
-  const [children, setChildren] = useState([{ name: "", dob: "", socksOpted: false }]);
+  const [children, setChildren] = useState([{ name: "", dob: "", gender: "not_specified", socksOpted: false }]);
   const [notes, setNotes] = useState("");
   const [bandNumber, setBandNumber] = useState("");
   const [offerId, setOfferId] = useState("none");
@@ -227,7 +227,7 @@ function BillingPage() {
   }, []);
 
   const addChild = () => {
-    setChildren([...children, { name: "", dob: "", socksOpted: false }]);
+    setChildren([...children, { name: "", dob: "", gender: "not_specified", socksOpted: false }]);
   };
 
   const removeChild = (i) => {
@@ -258,7 +258,7 @@ function BillingPage() {
     setCustomer(selectedCustomer);
     setParentName(selectedCustomer.parentName || "");
     setMobile(selectedCustomer.mobileNumber || "");
-    setGender(selectedCustomer.gender || "");
+    setArea(selectedCustomer.area || "");
     setCity(selectedCustomer.city || "");
     setBandNumber(selectedCustomer.bandNumber || "");
     setReference(selectedCustomer.reference || "");
@@ -267,12 +267,13 @@ function BillingPage() {
     const mappedChildren = (selectedCustomer.children || []).map((child) => ({
       name: child.name || "",
       dob: child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "",
+      gender: child.gender || "not_specified",
       socksOpted: false,
     }));
 
-    setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "", socksOpted: false }]);
+    setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "", gender: "not_specified", socksOpted: false }]);
     setSearchResults([]);
-    setErrors((prev) => ({ ...prev, parentName: "", mobile: "" }));
+    setErrors((prev) => ({ ...prev, parentName: "", mobile: "", area: "", city: "" }));
     axios.get(`${API_BASE}/memberships/active/${encodeURIComponent(selectedCustomer.mobileNumber || "")}`, { withCredentials: true })
       .then((response) => {
         const activeMembership = response.data?.membership || null;
@@ -322,6 +323,14 @@ function BillingPage() {
       nextErrors.mobile = "Mobile number is required";
     } else if (mobile.trim().length < 10) {
       nextErrors.mobile = "Mobile number must be at least 10 digits";
+    }
+
+    if (!area.trim()) {
+      nextErrors.area = "Area is required";
+    }
+
+    if (!city.trim()) {
+      nextErrors.city = "City is required";
     }
 
     const validChildren = children.filter((child) => child.name.trim() && child.dob);
@@ -389,6 +398,7 @@ function BillingPage() {
         .map((c) => ({
           name: c.name.trim(),
           dob: c.dob,
+          gender: c.gender || "not_specified",
           socksOpted: Boolean(c.socksOpted),
         }));
 
@@ -410,7 +420,7 @@ function BillingPage() {
       const payload = {
         parentName,
         mobileNumber: mobile,
-        gender,
+        area,
         city,
         bandNumber,
 
@@ -459,11 +469,11 @@ function BillingPage() {
     setCustomer(null);
     setParentName("");
     setMobile("");
-    setGender("");
+    setArea("");
     setCity("");
     setLookup("");
     setSearchResults([]);
-    setChildren([{ name: "", dob: "", socksOpted: false }]);
+    setChildren([{ name: "", dob: "", gender: "not_specified", socksOpted: false }]);
     setBandNumber("");
     setOfferId("none");
     setMembershipPlanId("none");
@@ -616,29 +626,36 @@ function BillingPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-5">
+          <div className="grid grid-cols-2 gap-5">
             <div className="space-y-2">
-              <Label>Gender (optional)</Label>
-              <select
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={gender}
-                onChange={(e) => setGender(e.target.value)}
-              >
-                <option value="">Not specified</option>
-                <option value="female">Female</option>
-                <option value="male">Male</option>
-                <option value="other">Other</option>
-              </select>
+              <Label>Area *</Label>
+              <Input
+                name="area"
+                autoComplete="address-level3"
+                value={area}
+                onChange={(e) => {
+                  setArea(e.target.value);
+                  setErrors((prev) => ({ ...prev, area: "" }));
+                }}
+                className={errors.area ? "border-red-500" : ""}
+                placeholder="Satellite"
+              />
+              {errors.area && <p className="text-xs text-red-500">{errors.area}</p>}
             </div>
-            <div className="col-span-2 space-y-2">
-              <Label>City (optional)</Label>
+            <div className="space-y-2">
+              <Label>City *</Label>
               <Input
                 name="city"
                 autoComplete="address-level2"
                 value={city}
-                onChange={(e) => setCity(e.target.value)}
+                onChange={(e) => {
+                  setCity(e.target.value);
+                  setErrors((prev) => ({ ...prev, city: "" }));
+                }}
+                className={errors.city ? "border-red-500" : ""}
                 placeholder="Ahmedabad"
               />
+              {errors.city && <p className="text-xs text-red-500">{errors.city}</p>}
             </div>
           </div>
 
@@ -661,7 +678,7 @@ function BillingPage() {
                     key={i}
                     className="grid grid-cols-12 gap-2 items-center p-3 rounded-xl bg-secondary/40 border"
                   >
-                    <div className="col-span-4">
+                    <div className="col-span-3">
                       <Input
                         placeholder="Child name"
                         value={c.name}
@@ -692,16 +709,27 @@ function BillingPage() {
                         />
                         {childDobError && <p className="mt-1 text-xs text-red-500">{childDobError}</p>}
                       </div>
-                    <div className="col-span-2 text-sm text-center">
+                    <div className="col-span-2">
+                      <select
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        value={c.gender || "not_specified"}
+                        onChange={(e) => updateChild(i, { gender: e.target.value })}
+                      >
+                        <option value="boy">Boy</option>
+                        <option value="girl">Girl</option>
+                        <option value="not_specified">Not Specified</option>
+                      </select>
+                    </div>
+                    <div className="col-span-1 text-sm text-center">
                       {age !== null ? (
                         <span
-                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                          className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-full text-[10px] font-medium ${
                             age < 3
                               ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
                               : "bg-primary/15 text-primary"
                           }`}
                         >
-                          {age}y · {age < 3 ? "<3" : "3+"}
+                          {age}y
                         </span>
                       ) : (
                         <span className="text-muted-foreground text-xs">—</span>

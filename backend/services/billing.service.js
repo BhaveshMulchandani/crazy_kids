@@ -39,7 +39,7 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount 
     const firstHourCharge = specialDayMatches ? Number(offer.rules?.firstHourPrice || 0) : normalFirst;
     const extensionRate = specialDayMatches ? Number(offer.rules?.nextHourPrice || 0) : normalExtension;
     if (specialDayMatches) specialPricingApplied = true;
-    return { name: child.name || "", dob: child.dob || null, age: Number(child.age || 0), firstHourCharge, extensionHours, extensionRate, childTotal: round(firstHourCharge + extensionHours * extensionRate), socksOpted: Boolean(child.socksOpted) };
+    return { name: child.name || "", dob: child.dob || null, age: Number(child.age || 0), gender: child.gender || "not_specified", firstHourCharge, extensionHours, extensionRate, childTotal: round(firstHourCharge + extensionHours * extensionRate), socksOpted: Boolean(child.socksOpted) };
   });
   const normalSessionTotal = round(childCharges.reduce((sum, child) => sum + child.childTotal, 0));
   const offerConditionsMet = offer && children.length >= Number(offer.rules?.minKids || Infinity);

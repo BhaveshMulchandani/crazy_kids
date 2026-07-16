@@ -20,7 +20,7 @@ const invoiceSchema = new mongoose.Schema(
       mobileNumber: { type: String, default: "" },
       bandNumber: { type: String, default: "" },
       sessionNumber: { type: String, default: "" },
-      gender: { type: String, default: "" },
+      area: { type: String, default: "" },
       city: { type: String, default: "" },
     },
 
@@ -29,6 +29,7 @@ const invoiceSchema = new mongoose.Schema(
         name: { type: String, default: "" },
         dob: { type: Date, default: null },
         age: { type: Number, default: 0 },
+        gender: { type: String, enum: ["boy", "girl", "not_specified"], default: "not_specified" },
         firstHourCharge: { type: Number, default: 0 },
         extensionHours: { type: Number, default: 0 },
         extensionRate: { type: Number, default: 0 },

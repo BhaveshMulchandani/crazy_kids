@@ -47,6 +47,12 @@ const childSchema = new mongoose.Schema(
       min: 0,
     },
 
+    gender: {
+      type: String,
+      enum: ["boy", "girl", "not_specified"],
+      default: "not_specified",
+    },
+
     socksOpted: {
       type: Boolean,
       default: false,
@@ -97,15 +103,15 @@ const sessionSchema = new mongoose.Schema(
       index: true,
     },
 
-    gender: {
+    area: {
       type: String,
-      default: "",
+      required: true,
       trim: true,
     },
 
     city: {
       type: String,
-      default: "",
+      required: true,
       trim: true,
     },
 

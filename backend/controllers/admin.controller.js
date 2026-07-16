@@ -348,7 +348,7 @@ const monthRange = (month, year) => {
 const getMonthlyReportData = async (month, year) => {
   const { start, end } = monthRange(month, year);
 
-  const [visitAgg, invoiceAgg, cityAgg] = await Promise.all([
+  const [visitAgg, invoiceAgg, cityAgg, areaAgg] = await Promise.all([
     sessionmodel.aggregate([
       { $match: { status: "completed", actualEndTime: { $gte: start, $lt: end } } },
       {
@@ -387,6 +387,7 @@ const getMonthlyReportData = async (month, year) => {
           socksQty: { $sum: "$charges.socksQty" },
           parentName: { $last: "$customer.parentName" },
           customerId: { $last: "$customer.sessionNumber" },
+          area: { $last: "$customer.area" },
           city: { $last: "$customer.city" },
           offerName: { $last: "$offer.name" },
           membershipApplied: { $last: "$membership.applied" },
@@ -403,6 +404,7 @@ const getMonthlyReportData = async (month, year) => {
           socksQty: 1,
           parentName: 1,
           customerId: 1,
+          area: 1,
           city: 1,
           offerName: 1,
           membershipApplied: 1,
@@ -422,6 +424,16 @@ const getMonthlyReportData = async (month, year) => {
       {
         $group: {
           _id: { $ifNull: ["$customer.city", ""] },
+          revenue: { $sum: "$charges.grandTotal" },
+        },
+      },
+      { $sort: { revenue: -1 } },
+    ]),
+    Invoice.aggregate([
+      { $match: { createdAt: { $gte: start, $lt: end } } },
+      {
+        $group: {
+          _id: { $ifNull: ["$customer.area", ""] },
           revenue: { $sum: "$charges.grandTotal" },
         },
       },
@@ -449,6 +461,7 @@ const getMonthlyReportData = async (month, year) => {
       mobileNumber,
       customerId: invoiceRow?.customerId || visitRow?.customerId || "-",
       parentName: invoiceRow?.parentName || visitRow?.parentName || "-",
+      area: invoiceRow?.area || "-",
       city: invoiceRow?.city || "-",
       offerOrMembership,
       childNames: [...childNames],
@@ -489,7 +502,12 @@ const getMonthlyReportData = async (month, year) => {
     revenue: row.revenue || 0,
   }));
 
-  return { month: Number(month), year: Number(year), monthName: MONTH_NAMES[month - 1], customers, summary, revenueByCity };
+  const revenueByArea = areaAgg.map((row) => ({
+    area: row._id?.trim() ? row._id.trim() : "Unknown",
+    revenue: row.revenue || 0,
+  }));
+
+  return { month: Number(month), year: Number(year), monthName: MONTH_NAMES[month - 1], customers, summary, revenueByCity, revenueByArea };
 };
 
 const parseMonthYear = (req, res) => {
@@ -526,11 +544,11 @@ const monthlyCustomerReportPdf = async (req, res) => {
     if (!parsed) return;
 
     const report = await getMonthlyReportData(parsed.month, parsed.year);
-    const { customers, summary, monthName, year, revenueByCity } = report;
+    const { customers, summary, monthName, year, revenueByCity, revenueByArea } = report;
 
-    // Landscape — the report now carries 12 columns (city + offer/membership
-    // + the session/cafe/socks breakdown added on top of the original 7),
-    // which no longer fits comfortably on a portrait page.
+    // Landscape — the report now carries 13 columns (area + city +
+    // offer/membership + the session/cafe/socks breakdown added on top of
+    // the original 7), which no longer fits comfortably on a portrait page.
     const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 40, bufferPages: true });
     const filename = `Customer_Report_${monthName}_${year}.pdf`;
 
@@ -546,17 +564,18 @@ const monthlyCustomerReportPdf = async (req, res) => {
     // (rows below size themselves to whichever is tallest).
     const columns = [
       { key: "customerId", label: "Customer ID", width: 55, align: "left" },
-      { key: "childNames", label: "Child Name(s)", width: 100, align: "left", wrap: true },
-      { key: "parentName", label: "Parent Name", width: 76, align: "left" },
-      { key: "mobileNumber", label: "Mobile Number", width: 72, align: "left" },
-      { key: "city", label: "City", width: 50, align: "left" },
-      { key: "offerOrMembership", label: "Offer / Membership", width: 82, align: "left" },
-      { key: "visits", label: "Visits", width: 38, align: "right" },
-      { key: "sessionTotal", label: "Session Total", width: 62, align: "right" },
-      { key: "cafeTotal", label: "Cafe Total", width: 58, align: "right" },
-      { key: "socksQty", label: "Socks Qty", width: 50, align: "right" },
-      { key: "rewardPoints", label: "Points", width: 44, align: "right" },
-      { key: "totalSpent", label: "Total Spent", width: 66, align: "right" },
+      { key: "childNames", label: "Child Name(s)", width: 92, align: "left", wrap: true },
+      { key: "parentName", label: "Parent Name", width: 72, align: "left" },
+      { key: "mobileNumber", label: "Mobile Number", width: 70, align: "left" },
+      { key: "area", label: "Area", width: 44, align: "left" },
+      { key: "city", label: "City", width: 46, align: "left" },
+      { key: "offerOrMembership", label: "Offer / Membership", width: 80, align: "left" },
+      { key: "visits", label: "Visits", width: 36, align: "right" },
+      { key: "sessionTotal", label: "Session Total", width: 58, align: "right" },
+      { key: "cafeTotal", label: "Cafe Total", width: 54, align: "right" },
+      { key: "socksQty", label: "Socks Qty", width: 46, align: "right" },
+      { key: "rewardPoints", label: "Points", width: 42, align: "right" },
+      { key: "totalSpent", label: "Total Spent", width: 60, align: "right" },
     ];
     const tableLeft = doc.page.margins.left;
     const tableWidth = columns.reduce((sum, c) => sum + c.width, 0);
@@ -646,6 +665,7 @@ const monthlyCustomerReportPdf = async (req, res) => {
         childNames: customer.childNames.join(", ") || "-",
         parentName: customer.parentName,
         mobileNumber: customer.mobileNumber,
+        area: customer.area || "-",
         city: customer.city || "-",
         offerOrMembership: customer.offerOrMembership || "-",
         visits: String(customer.visits),
@@ -739,6 +759,14 @@ const monthlyCustomerReportPdf = async (req, res) => {
     ];
 
     y = drawCardSection("Summary", summaryLines, y + CARD_GAP);
+
+    if (revenueByArea.length > 0) {
+      const areaRows = revenueByArea.map(({ area, revenue }) => [
+        area,
+        `Rs. ${Number(revenue).toLocaleString("en-IN")}`,
+      ]);
+      y = drawCardSection("Revenue By Area", areaRows, y);
+    }
 
     if (revenueByCity.length > 0) {
       const cityRows = revenueByCity.map(({ city, revenue }) => [

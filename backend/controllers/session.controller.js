@@ -54,7 +54,7 @@ const createsession = async (
     const {
       parentName,
       mobileNumber,
-      gender,
+      area,
       city,
       bandNumber,
       children,
@@ -85,6 +85,20 @@ const createsession = async (
       });
     }
 
+    if (!area?.trim()) {
+      return res.status(400).json({
+        message:
+          "Area is required",
+      });
+    }
+
+    if (!city?.trim()) {
+      return res.status(400).json({
+        message:
+          "City is required",
+      });
+    }
+
     if (
       !children ||
       !Array.isArray(children) ||
@@ -95,6 +109,8 @@ const createsession = async (
           "At least one child is required",
       });
     }
+
+    const GENDER_VALUES = ["boy", "girl", "not_specified"];
 
     const processedChildren =
       children.map((child) => {
@@ -113,6 +129,9 @@ const createsession = async (
           age: calculateAge(
             child.dob
           ),
+          gender: GENDER_VALUES.includes(child.gender)
+            ? child.gender
+            : "not_specified",
           socksOpted: Boolean(child.socksOpted),
         };
       });
@@ -156,11 +175,11 @@ const createsession = async (
         mobileNumber:
           mobileNumber.trim(),
 
-        gender:
-          gender?.trim() || "",
+        area:
+          area.trim(),
 
         city:
-          city?.trim() || "",
+          city.trim(),
 
         bandNumber:
           bandNumber?.trim() || "",
@@ -627,7 +646,7 @@ const completesession = async (req, res) => {
       const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
       const loyaltyPoints = Math.floor(calculation.grandTotal / 100) * pointsPer100;
       await Invoice.create({ invoiceNumber: `INV-${Date.now()}`, session: session._id,
-        customer: { parentName: session.parentName, mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber, gender: session.gender || "", city: session.city || "" },
+        customer: { parentName: session.parentName, mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber, area: session.area || "", city: session.city || "" },
         children: calculation.childCharges,
         sessionDetails: { startTime: session.startTime, endTime: session.actualEndTime, actualDurationMinutes, totalHours: calculation.totalHours, extensionHours: calculation.extensionHours, pauseTimeMinutes: session.totalPausedMinutes || 0 },
         cafeItems: calculation.cafeItems,
@@ -782,7 +801,7 @@ const searchBillingCustomer = async (req, res) => {
           }
         ],
       })
-      .select("_id sessionNumber parentName mobileNumber gender city bandNumber children reference notes createdAt")
+      .select("_id sessionNumber parentName mobileNumber area city bandNumber children reference notes createdAt")
       .sort({ createdAt: -1 });
 
     const mobileNumbers = [...new Set(matches.map((session) => session.mobileNumber))];
@@ -804,7 +823,7 @@ const searchBillingCustomer = async (req, res) => {
     });
     // `matches` is sorted newest-first, so the first session seen per
     // mobile number is kept as the customer's profile. But that latest
-    // visit may have left an optional field (city, gender, band number)
+    // visit may have left an optional field (area, city, band number)
     // blank even though an earlier visit had it on file — backfill from
     // those older sessions rather than surfacing a blank value when a
     // saved one exists elsewhere in the customer's history.
@@ -813,8 +832,8 @@ const searchBillingCustomer = async (req, res) => {
         uniqueCustomers.set(session.mobileNumber, { ...session.toObject(), ...(totalsByMobile.get(session.mobileNumber) || {}) });
       } else {
         const existing = uniqueCustomers.get(session.mobileNumber);
+        if (!existing.area && session.area) existing.area = session.area;
         if (!existing.city && session.city) existing.city = session.city;
-        if (!existing.gender && session.gender) existing.gender = session.gender;
         if (!existing.bandNumber && session.bandNumber) existing.bandNumber = session.bandNumber;
       }
       return uniqueCustomers;

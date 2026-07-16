@@ -17,6 +17,8 @@ import {
   Baby,
   Clock,
   ChevronDown,
+  MessageCircle,
+  Loader2,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
@@ -942,6 +944,8 @@ const invoiceTdStyle = {
 };
 
 const InvoiceDialog = ({ invoice, onClose }) => {
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
+
   if (!invoice) return null;
 
   const print = () => {
@@ -959,6 +963,32 @@ const InvoiceDialog = ({ invoice, onClose }) => {
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 250);
+  };
+
+  // Prevents duplicate sends: bails immediately if a request is already in
+  // flight rather than relying solely on the button's disabled attribute.
+  const sendWhatsApp = async () => {
+    if (sendingWhatsApp) return;
+
+    const invoiceId = invoice?.invoiceId || invoice?._id;
+    if (!invoiceId) {
+      toast.error("Invoice not found");
+      return;
+    }
+
+    setSendingWhatsApp(true);
+    try {
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/invoice/${invoiceId}/send-whatsapp`,
+        {},
+        { withCredentials: true },
+      );
+      toast.success(response.data?.message || "Invoice sent successfully on WhatsApp.");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to send invoice on WhatsApp");
+    } finally {
+      setSendingWhatsApp(false);
+    }
   };
 
   const customer = invoice?.customer || {};
@@ -1196,14 +1226,29 @@ const InvoiceDialog = ({ invoice, onClose }) => {
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
           <Button
             onClick={print}
             style={{ background: "var(--primary)" }}
           >
             <Printer className="h-4 w-4 mr-2" /> Print invoice
+          </Button>
+          <Button
+            variant="outline"
+            onClick={sendWhatsApp}
+            disabled={sendingWhatsApp}
+          >
+            {sendingWhatsApp ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Sending...
+              </>
+            ) : (
+              <>
+                <MessageCircle className="h-4 w-4 mr-2" /> Send WhatsApp
+              </>
+            )}
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            Close
           </Button>
         </DialogFooter>
       </DialogContent>
