@@ -18,7 +18,11 @@ const cookieParser = require("cookie-parser");
 app.use(
   cors({ 
     // "http://localhost:5173"
-    origin: ["https://crazy-kids-psi.vercel.app", "https://pos.sosiyo.com"],
+    origin: [
+      "https://crazy-kids-git-main-bhavesh-mulchandanis-projects.vercel.app",
+      "https://crazy-kids-psi.vercel.app",
+      "https://pos.sosiyo.com"
+    ],
     credentials: true,
   })
 );
