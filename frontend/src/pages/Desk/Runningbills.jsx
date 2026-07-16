@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 // Helper functions
 const elapsedSeconds = (bill) => {
@@ -943,6 +945,43 @@ const invoiceTdStyle = {
   borderBottom: `1px solid ${INVOICE_BORDER}`,
 };
 
+// Rasterizes the exact same #invoice-print DOM node the "Print invoice"
+// button reads (see `print()` below) into a PDF Blob, so the document sent
+// on WhatsApp is always visually identical to what gets printed — one
+// template, not a separate one maintained for WhatsApp.
+const generateInvoicePdfBlob = async () => {
+  const node = document.getElementById("invoice-print");
+  if (!node) return null;
+
+  const canvas = await html2canvas(node, {
+    scale: 2,
+    backgroundColor: "#ffffff",
+    useCORS: true,
+  });
+
+  const imgData = canvas.toDataURL("image/png");
+  const pdf = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const imgWidth = pageWidth;
+  const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+  let heightLeft = imgHeight;
+  let position = 0;
+
+  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+  heightLeft -= pageHeight;
+
+  while (heightLeft > 0) {
+    position = heightLeft - imgHeight;
+    pdf.addPage();
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+  }
+
+  return pdf.output("blob");
+};
+
 const InvoiceDialog = ({ invoice, onClose }) => {
   const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
 
@@ -978,6 +1017,20 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
     setSendingWhatsApp(true);
     try {
+      const pdfBlob = await generateInvoicePdfBlob();
+      if (!pdfBlob) {
+        toast.error("Unable to generate invoice PDF");
+        return;
+      }
+
+      // Upload the print-identical PDF first so it's in place before the
+      // WhatsApp trigger asks TrdAI to fetch it.
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/invoice/${invoiceId}/pdf`,
+        pdfBlob,
+        { withCredentials: true, headers: { "Content-Type": "application/pdf" } },
+      );
+
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/invoice/${invoiceId}/send-whatsapp`,
         {},

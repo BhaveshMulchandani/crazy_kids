@@ -1,4 +1,3 @@
-const PDFDocument = require("pdfkit");
 const Invoice = require("../models/invoice.model");
 const Session = require("../models/session.model");
 const KOT = require("../models/cafe.model");
@@ -162,115 +161,73 @@ const listInvoices = async (req, res) => {
   }
 };
 
-const money = (value) => `Rs. ${Number(value || 0).toLocaleString("en-IN")}`;
+// Accepts the exact PDF bytes the frontend rendered from the same
+// #invoice-print markup the "Print invoice" button uses (see
+// Runningbills.jsx), and stores them as-is. No PDF generation happens on
+// the backend — this only persists what the client already produced, so
+// there is a single invoice template (the print one) instead of a
+// duplicate PDFKit-authored one.
+const uploadInvoicePdf = async (req, res) => {
+  try {
+    const { invoiceId } = req.params;
 
-// Renders the already-computed Invoice document (charges, children, cafe
-// items — all produced once by billing.service.js at checkout time) as a
-// PDF. No pricing/billing calculation happens here; this only formats
-// fields that already exist on the invoice, the same data the on-screen
-// "Generate Invoice" modal already prints via the browser.
-const renderInvoicePdf = (invoice) => {
-  const doc = new PDFDocument({ size: "A4", margin: 48 });
-  const customer = invoice.customer || {};
-  const children = invoice.children || [];
-  const cafeItems = invoice.cafeItems || [];
-  const charges = invoice.charges || {};
-  const offer = invoice.offer || {};
-  const membership = invoice.membership || {};
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ message: "Invoice PDF file is required" });
+    }
 
-  doc.rect(0, 0, doc.page.width, 6).fill("#2563eb");
-  doc.moveDown(2);
-  doc.font("Helvetica-Bold").fontSize(20).fillColor("#0f172a").text("PLAYKIT");
-  doc.font("Helvetica").fontSize(10).fillColor("#64748b").text("Tax Invoice");
-  doc.moveDown(0.6);
-  doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text(`Invoice: ${invoice.invoiceNumber || "-"}`);
-  doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(`Date: ${invoice.createdAt ? new Date(invoice.createdAt).toLocaleString() : "-"}`);
-  doc.moveDown(0.8);
-  doc.strokeColor("#cbd5e1").lineWidth(1).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
-  doc.moveDown(0.8);
+    const invoice = await Invoice.findByIdAndUpdate(
+      invoiceId,
+      {
+        pdf: {
+          data: req.body,
+          contentType: "application/pdf",
+          generatedAt: new Date(),
+        },
+      },
+      { new: true }
+    ).select("_id");
 
-  doc.font("Helvetica").fontSize(10).fillColor("#1f2937");
-  doc.text(`Parent Name: ${customer.parentName || "-"}`);
-  doc.text(`Mobile Number: ${customer.mobileNumber || "-"}`);
-  if (customer.bandNumber) doc.text(`Band Number: ${customer.bandNumber}`);
-  if (customer.sessionNumber) doc.text(`Session Number: ${customer.sessionNumber}`);
-  if (customer.area) doc.text(`Area: ${customer.area}`);
-  if (customer.city) doc.text(`City: ${customer.city}`);
-  doc.moveDown(0.8);
+    if (!invoice) {
+      return res.status(404).json({ message: "Invoice not found" });
+    }
 
-  if (children.length > 0) {
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text("Children");
-    doc.moveDown(0.3);
-    doc.font("Helvetica").fontSize(9.5).fillColor("#1f2937");
-    children.forEach((child) => {
-      doc.text(
-        `${child.name || "-"}  |  Age ${child.age ?? "-"}  |  First Hour ${money(child.firstHourCharge)}  |  Socks ${child.socksOpted ? "Yes" : "No"}  |  Total ${money(child.childTotal)}`
-      );
-    });
-    doc.moveDown(0.8);
+    return res.status(200).json({ message: "Invoice PDF stored successfully" });
+  } catch (error) {
+    if (error.name === "CastError") {
+      return res.status(404).json({ message: "Invoice not found" });
+    }
+    return res.status(500).json({ message: error.message || "Unable to store invoice PDF" });
   }
-
-  if (cafeItems.length > 0) {
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text("Cafe Items");
-    doc.moveDown(0.3);
-    doc.font("Helvetica").fontSize(9.5).fillColor("#1f2937");
-    cafeItems.forEach((item) => {
-      doc.text(`${item.name || "-"}  x${item.quantity || 1}  |  ${money(item.lineTotal)}`);
-    });
-    doc.moveDown(0.8);
-  }
-
-  doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text("Charges");
-  doc.moveDown(0.3);
-  doc.font("Helvetica").fontSize(10).fillColor("#1f2937");
-  doc.text(`Session Charges: ${money(charges.sessionTotal)}`);
-  if (membership.applied) doc.text(`Membership Applied: ${membership.planName || "-"}`);
-  if (!membership.applied && offer.name) doc.text(`Offer Applied: ${offer.name}`);
-  if (charges.discountAmount) doc.text(`Discount Amount: -${money(charges.discountAmount)}`);
-  if (charges.membershipPurchaseTotal) doc.text(`Membership Purchase: ${money(charges.membershipPurchaseTotal)}`);
-  doc.text(`Cafe Total: ${money(charges.cafeTotal)}`);
-  if (charges.socksQty) doc.text(`Socks (${charges.socksQty} x ${money(charges.socksRate)}): ${money(charges.socksTotal)}`);
-  if (charges.extraDiscountAmount) doc.text(`Extra Discount: -${money(charges.extraDiscountAmount)}`);
-  doc.text(`Loyalty Points Earned: ${charges.loyaltyPoints || 0}`);
-  doc.moveDown(0.6);
-  doc.strokeColor("#cbd5e1").lineWidth(1).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
-  doc.moveDown(0.6);
-  doc.font("Helvetica-Bold").fontSize(14).fillColor("#0f172a").text(`Grand Total: ${money(charges.grandTotal)}`);
-  doc.moveDown(1.5);
-  doc.font("Helvetica-Oblique").fontSize(9).fillColor("#94a3b8").text("Thank you for visiting!", { align: "center" });
-
-  return doc;
 };
 
 // Public (no auth) by design — TrdAI's servers fetch this URL directly to
 // attach the PDF to the WhatsApp message, so it can't require a session
 // cookie. The invoice id is an unguessable Mongo ObjectId, so this is
 // effectively a share-link, the same trust model as e.g. hosted invoice
-// links from other billing providers.
+// links from other billing providers. Serves back exactly what
+// uploadInvoicePdf stored — the print invoice, unmodified.
 const getInvoicePdf = async (req, res) => {
   try {
     const { invoiceId } = req.params;
-    const invoice = await Invoice.findById(invoiceId).lean();
+    const invoice = await Invoice.findById(invoiceId).select("invoiceNumber pdf").lean();
 
     if (!invoice) {
       return res.status(404).json({ message: "Invoice not found" });
     }
 
-    const filename = `Invoice_${invoice.invoiceNumber || invoice._id}.pdf`;
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    if (!invoice.pdf?.data) {
+      return res.status(404).json({ message: "Invoice PDF not found" });
+    }
 
-    const doc = renderInvoicePdf(invoice);
-    doc.pipe(res);
-    doc.end();
+    const filename = `Invoice_${invoice.invoiceNumber || invoice._id}.pdf`;
+    res.setHeader("Content-Type", invoice.pdf.contentType || "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    return res.send(invoice.pdf.data);
   } catch (error) {
     if (error.name === "CastError") {
       return res.status(404).json({ message: "Invoice not found" });
     }
-    if (!res.headersSent) {
-      return res.status(500).json({ message: error.message || "Unable to generate invoice PDF" });
-    }
-    res.end();
+    return res.status(500).json({ message: error.message || "Unable to load invoice PDF" });
   }
 };
 
@@ -285,6 +242,10 @@ const sendInvoiceWhatsApp = async (req, res) => {
     const invoice = await Invoice.findById(invoiceId);
     if (!invoice) {
       return res.status(404).json({ message: "Invoice not found" });
+    }
+
+    if (!invoice.pdf?.data) {
+      return res.status(404).json({ message: "Invoice PDF not found." });
     }
 
     const session = invoice.session ? await Session.findById(invoice.session).lean() : null;
@@ -325,6 +286,7 @@ module.exports = {
   getInvoiceBySession,
   getInvoiceById,
   listInvoices,
+  uploadInvoicePdf,
   getInvoicePdf,
   sendInvoiceWhatsApp,
 };

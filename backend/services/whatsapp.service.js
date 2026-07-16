@@ -50,6 +50,17 @@ const sendInvoice = async ({ destination, userName, invoiceNumber, grandTotal, r
     throw error;
   }
 
+  // Only the fields the TrdAI Campaign Trigger API documents are ever sent:
+  // apiKey, campaignName, destination, userName, media, templateParams
+  // (source/tags/attributes are omitted entirely since they're unused here).
+  // templateParams is positional and maps 1:1 onto the approved
+  // "invoiceandreview" template's body placeholders —
+  // {{1}} Parent Name, {{2}} Invoice Number, {{3}} Grand Total, {{4}} Reward
+  // Points — nothing else. There is deliberately no "buttons" key: the
+  // template's Call button and static URL button are both static (a Call
+  // button can never accept a parameter on WhatsApp's platform, and the
+  // static URL button needs none), so no button parameters are ever
+  // constructed or serialized here.
   const payload = {
     apiKey,
     campaignName,
@@ -101,11 +112,16 @@ const sendInvoice = async ({ destination, userName, invoiceNumber, grandTotal, r
 
   console.log("[whatsapp.service] response", { status: response.status, body });
 
-  // A 2xx HTTP status alone isn't proof of success — some gateways return
-  // 200 with an error payload — so also check common failure shapes in the
-  // body before treating this as a successful send.
+  // A 2xx HTTP status alone isn't proof of success — TrdAI's own
+  // success/failure flag has been observed as the *string* "true"/"false"
+  // rather than a boolean (e.g. {"success":"true","submitted_message_id":
+  // "..."}), so a strict `=== false` check would silently miss a
+  // string-"false" failure. Normalize before comparing.
+  const successFlag = body && typeof body === "object" ? body.success : undefined;
+  const successFlagIsFalse =
+    successFlag === false || (typeof successFlag === "string" && successFlag.toLowerCase() === "false");
   const bodyIndicatesFailure =
-    body && typeof body === "object" && (body.status === "error" || body.success === false || body.error);
+    body && typeof body === "object" && (body.status === "error" || successFlagIsFalse || body.error);
 
   if (!response.ok || bodyIndicatesFailure) {
     const message =

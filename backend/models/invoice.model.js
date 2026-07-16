@@ -105,6 +105,18 @@ const invoiceSchema = new mongoose.Schema(
       amountPaid: { type: Number, default: 0 },
       pendingAmount: { type: Number, default: 0 },
     },
+
+    // The exact print-ready invoice, captured client-side from the same
+    // #invoice-print markup the "Print invoice" button uses, uploaded once
+    // via POST /invoice/:invoiceId/pdf. Served back as-is by
+    // GET /invoice/:invoiceId/pdf — nothing on the backend re-renders or
+    // re-derives this, so Print and the WhatsApp attachment are always the
+    // same document.
+    pdf: {
+      data: { type: Buffer, default: null },
+      contentType: { type: String, default: "application/pdf" },
+      generatedAt: { type: Date, default: null },
+    },
   },
   {
     timestamps: true,
