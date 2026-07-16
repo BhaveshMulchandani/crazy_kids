@@ -1,6 +1,7 @@
 const cafemodel = require("../models/cafe.model");
 const menumodel = require("../models/menu.model");
 const sessionmodel = require("../models/session.model");
+const { getNextFormattedNumber } = require("../services/counter.service");
 
 const searchCustomer = async (req, res) => {
   try {
@@ -121,12 +122,16 @@ const createKOT = async (req, res) => {
       });
     }
 
-    const count =
-      (await cafemodel.countDocuments()) + 1;
-
-    const kotNumber = `KOT-${String(
-      count
-    ).padStart(5, "0")}`;
+    // countDocuments()+1 is not concurrency-safe — two cafe orders placed
+    // close together can both read the same count before either insert
+    // lands, generating the same kotNumber and crashing on its unique index.
+    const kotNumber = await getNextFormattedNumber({
+      name: "kotNumber",
+      model: cafemodel,
+      field: "kotNumber",
+      prefix: "KOT-",
+      padLength: 5,
+    });
 
     const kot = await cafemodel.create({
       kotNumber,

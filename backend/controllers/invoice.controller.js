@@ -4,11 +4,20 @@ const KOT = require("../models/cafe.model");
 const PriceSetting = require("../models/price.model");
 const { calculateInvoiceCharges } = require("../services/billing.service");
 const whatsappService = require("../services/whatsapp.service");
+const { getNextFormattedNumber } = require("../services/counter.service");
 
-const generateInvoiceNumber = async () => {
-  const count = await Invoice.countDocuments();
-  return `INV-${String(count + 1).padStart(5, "0")}`;
-};
+// countDocuments()+1 is not concurrency-safe (two concurrent invoice
+// creations can read the same count before either write lands) and would
+// also collide with session.controller.js:completesession, which shares
+// this same atomic "invoiceNumber" sequence.
+const generateInvoiceNumber = () =>
+  getNextFormattedNumber({
+    name: "invoiceNumber",
+    model: Invoice,
+    field: "invoiceNumber",
+    prefix: "INV-",
+    padLength: 5,
+  });
 
 // Mirrors the invoice payload built at session completion time
 // (session.controller.js:completesession) so offer discounts and active
@@ -111,11 +120,20 @@ const createInvoice = async (req, res) => {
     const invoicePayload = await buildInvoicePayload({ session, kots, settings });
     const invoiceNumber = await generateInvoiceNumber();
 
-    const invoice = await Invoice.create({
-      invoiceNumber,
-      session: session._id,
-      ...invoicePayload,
-    });
+    let invoice;
+    try {
+      invoice = await Invoice.create({
+        invoiceNumber,
+        session: session._id,
+        ...invoicePayload,
+      });
+    } catch (createError) {
+      // A concurrent request already created the invoice for this session
+      // (unique index on Invoice.session) — return that one instead of
+      // failing, matching the "already exists" branch above.
+      if (createError.code !== 11000) throw createError;
+      invoice = await Invoice.findOne({ session: id });
+    }
 
     return res.status(201).json({ message: "Invoice created successfully", invoice });
   } catch (error) {

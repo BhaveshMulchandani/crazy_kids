@@ -43,6 +43,7 @@ const Membership = require('../models/membership.model');
 const { createMembership, refreshStatus } = require('./membership.controller');
 const { calculateInvoiceCharges } = require('../services/billing.service');
 const Notification = require('../models/notification.model');
+const { getNextFormattedNumber } = require('../services/counter.service');
 
 const membershipChildKey = (child) => `${String(child.name || "").trim().toLowerCase()}|${new Date(child.dob).toISOString().slice(0, 10)}`;
 
@@ -136,13 +137,17 @@ const createsession = async (
         };
       });
 
-    const count =
-      (await sessionmodel.countDocuments()) +
-      1;
-
-    const sessionNumber = `CK-${String(
-      count
-    ).padStart(5, "0")}`;
+    // countDocuments()+1 is not concurrency-safe — two bookings arriving
+    // close together can both read the same count before either insert
+    // lands, generating the same sessionNumber and crashing on the unique
+    // index. getNextFormattedNumber() reserves the number atomically.
+    const sessionNumber = await getNextFormattedNumber({
+      name: "sessionNumber",
+      model: sessionmodel,
+      field: "sessionNumber",
+      prefix: "CK-",
+      padLength: 5,
+    });
 
     let purchasedMembership = null;
     if (purchaseMembershipPlan) {
@@ -645,16 +650,36 @@ const completesession = async (req, res) => {
       const actualDurationMinutes = startTime ? Math.max(0, Math.round((session.actualEndTime - startTime) / 60000)) : 0;
       const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
       const loyaltyPoints = Math.floor(calculation.grandTotal / 100) * pointsPer100;
-      await Invoice.create({ invoiceNumber: `INV-${Date.now()}`, session: session._id,
-        customer: { parentName: session.parentName, mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber, area: session.area || "", city: session.city || "" },
-        children: calculation.childCharges,
-        sessionDetails: { startTime: session.startTime, endTime: session.actualEndTime, actualDurationMinutes, totalHours: calculation.totalHours, extensionHours: calculation.extensionHours, pauseTimeMinutes: session.totalPausedMinutes || 0 },
-        cafeItems: calculation.cafeItems,
-        charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, extraDiscountAmount: calculation.extraDiscountAmount, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0), socksQty: calculation.socksQty, socksRate: calculation.socksRate, socksTotal: calculation.socksTotal },
-        offer: { name: calculation.offer?.name || "", type: calculation.offer?.type || "", discountAmount: calculation.discountAmount, specialPricingApplied: calculation.specialPricingApplied },
-        membership: { applied: calculation.membershipApplied, membership: calculation.membership?._id || null, planName: calculation.membership?.planName || "", hoursConsumed: calculation.membershipApplied ? calculation.totalHours : 0, hoursBeforeSession: calculation.membershipApplied ? hoursBeforeSession : 0, remainingHours: calculation.membershipApplied ? calculation.membership.remainingPlayHours : 0, expiryDate: calculation.membershipApplied ? calculation.membership.expiryDate : null, purchase: { planName: calculation.membershipPurchase?.planName || "", price: Number(calculation.membershipPurchase?.price || 0) } },
-        payment: { status: session.paymentStatus || "pending", breakdown: session.paymentBreakdown || [], amountPaid: Number(session.amountPaid || 0), pendingAmount: Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0) },
+      // Date.now() collides if two sessions complete within the same
+      // millisecond, crashing checkout on the unique invoiceNumber index.
+      // Shares the same atomic "invoiceNumber" sequence as
+      // invoice.controller.js:createInvoice so neither path can collide
+      // with the other.
+      const invoiceNumber = await getNextFormattedNumber({
+        name: "invoiceNumber",
+        model: Invoice,
+        field: "invoiceNumber",
+        prefix: "INV-",
+        padLength: 5,
       });
+      try {
+        await Invoice.create({ invoiceNumber, session: session._id,
+          customer: { parentName: session.parentName, mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber, area: session.area || "", city: session.city || "" },
+          children: calculation.childCharges,
+          sessionDetails: { startTime: session.startTime, endTime: session.actualEndTime, actualDurationMinutes, totalHours: calculation.totalHours, extensionHours: calculation.extensionHours, pauseTimeMinutes: session.totalPausedMinutes || 0 },
+          cafeItems: calculation.cafeItems,
+          charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, extraDiscountAmount: calculation.extraDiscountAmount, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0), socksQty: calculation.socksQty, socksRate: calculation.socksRate, socksTotal: calculation.socksTotal },
+          offer: { name: calculation.offer?.name || "", type: calculation.offer?.type || "", discountAmount: calculation.discountAmount, specialPricingApplied: calculation.specialPricingApplied },
+          membership: { applied: calculation.membershipApplied, membership: calculation.membership?._id || null, planName: calculation.membership?.planName || "", hoursConsumed: calculation.membershipApplied ? calculation.totalHours : 0, hoursBeforeSession: calculation.membershipApplied ? hoursBeforeSession : 0, remainingHours: calculation.membershipApplied ? calculation.membership.remainingPlayHours : 0, expiryDate: calculation.membershipApplied ? calculation.membership.expiryDate : null, purchase: { planName: calculation.membershipPurchase?.planName || "", price: Number(calculation.membershipPurchase?.price || 0) } },
+          payment: { status: session.paymentStatus || "pending", breakdown: session.paymentBreakdown || [], amountPaid: Number(session.amountPaid || 0), pendingAmount: Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0) },
+        });
+      } catch (invoiceError) {
+        // A concurrent/duplicate checkout request already created the
+        // invoice for this session (caught here by the unique index on
+        // Invoice.session) — the session is completed either way, so this
+        // isn't a failure the operator needs to see.
+        if (invoiceError.code !== 11000) throw invoiceError;
+      }
     }
 
     return res.status(200).json({

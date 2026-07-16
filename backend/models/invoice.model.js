@@ -8,10 +8,16 @@ const invoiceSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Unique so a session can never end up with two invoices — the
+    // "existingInvoice" check in session.controller.js:completesession is a
+    // check-then-act race under concurrent/duplicate checkout requests;
+    // this index turns that race into a safe, detectable duplicate-key
+    // error instead of silently doubling revenue/loyalty-point reporting.
     session: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "session",
       required: true,
+      unique: true,
       index: true,
     },
 
