@@ -199,6 +199,19 @@ const uploadInvoicePdf = async (req, res) => {
       return res.status(400).json({ message: "Invoice PDF file is required" });
     }
 
+    // Diagnostic only — confirms whether the bytes are already valid at the
+    // moment they're received, so a corrupt PDF on GET can be traced back
+    // to "the client sent bad bytes" vs. "storage/retrieval corrupted
+    // them" instead of guessing.
+    const uploadFirst10 = req.body.subarray(0, 10);
+    console.log("[invoice.controller] upload-pdf: received buffer", {
+      invoiceId,
+      sizeBytes: req.body.length,
+      first10Bytes: Array.from(uploadFirst10),
+      first10BytesAscii: uploadFirst10.toString("latin1"),
+      isValidPdf: req.body.subarray(0, 5).toString("latin1") === "%PDF-",
+    });
+
     const invoice = await Invoice.findByIdAndUpdate(
       invoiceId,
       {
@@ -231,6 +244,30 @@ const uploadInvoicePdf = async (req, res) => {
   }
 };
 
+// Buffer-schema fields don't always come back from Mongoose as a true
+// Node Buffer — depending on the driver/lean() path they can surface as the
+// JSON-round-tripped { type: "Buffer", data: [...] } shape, or a BSON
+// Binary wrapper. This matters a lot here: if a non-Buffer object were ever
+// handed to res.send(), Express silently JSON.stringifies it via res.json()
+// while the Content-Type header (already set to application/pdf at that
+// point) is left untouched — so the response claims to be a PDF but its
+// body actually starts with "{", which is exactly what "Failed to load
+// PDF" in a browser looks like. Coerce to a real Buffer no matter which
+// shape we got, so that failure mode can't happen.
+const toPdfBuffer = (value) => {
+  if (Buffer.isBuffer(value)) return value;
+  if (!value) return null;
+  if (typeof value.buffer === "function") return Buffer.from(value.buffer()); // BSON Binary
+  if (typeof value.value === "function") return Buffer.from(value.value(true)); // older BSON Binary
+  if (Array.isArray(value.data)) return Buffer.from(value.data); // {type:"Buffer",data:[...]}
+  if (value.buffer instanceof ArrayBuffer) {
+    return Buffer.from(value.buffer, value.byteOffset || 0, value.byteLength ?? value.buffer.byteLength);
+  }
+  return null;
+};
+
+const PDF_MAGIC = "%PDF-";
+
 // Public (no auth) by design — TrdAI's servers fetch this URL directly to
 // attach the PDF to the WhatsApp message, so it can't require a session
 // cookie. The invoice id is an unguessable Mongo ObjectId, so this is
@@ -238,26 +275,76 @@ const uploadInvoicePdf = async (req, res) => {
 // links from other billing providers. Serves back exactly what
 // uploadInvoicePdf stored — the print invoice, unmodified.
 const getInvoicePdf = async (req, res) => {
+  const { invoiceId } = req.params;
+  console.log("[invoice.controller] get-pdf: invoked", { invoiceId });
+
   try {
-    const { invoiceId } = req.params;
     const invoice = await Invoice.findById(invoiceId).select("invoiceNumber pdf").lean();
 
     if (!invoice) {
+      console.error("[invoice.controller] get-pdf: invoice not found", { invoiceId });
       return res.status(404).json({ message: "Invoice not found" });
     }
+    console.log("[invoice.controller] get-pdf: invoice found", {
+      invoiceId,
+      hasStoredPdf: Boolean(invoice.pdf?.data),
+      storedContentType: invoice.pdf?.contentType,
+      generatedAt: invoice.pdf?.generatedAt,
+    });
 
     if (!invoice.pdf?.data) {
+      console.error("[invoice.controller] get-pdf: no stored PDF for invoice", { invoiceId });
       return res.status(404).json({ message: "Invoice PDF not found" });
+    }
+
+    const pdfBuffer = toPdfBuffer(invoice.pdf.data);
+    if (!pdfBuffer || pdfBuffer.length === 0) {
+      console.error("[invoice.controller] get-pdf: stored PDF data could not be read as a buffer", {
+        invoiceId,
+        storedValueType: typeof invoice.pdf.data,
+        wasBufferInstance: Buffer.isBuffer(invoice.pdf.data),
+      });
+      return res.status(500).json({ message: "Invoice PDF is corrupted" });
+    }
+
+    const first10 = pdfBuffer.subarray(0, 10);
+    const isValidPdf = pdfBuffer.subarray(0, PDF_MAGIC.length).toString("latin1") === PDF_MAGIC;
+    console.log("[invoice.controller] get-pdf: generated PDF buffer", {
+      invoiceId,
+      sizeBytes: pdfBuffer.length,
+      first10Bytes: Array.from(first10),
+      first10BytesAscii: first10.toString("latin1"),
+      isValidPdf,
+    });
+
+    if (!isValidPdf) {
+      console.error("[invoice.controller] get-pdf: stored data does not start with \"%PDF-\" — not a valid PDF", {
+        invoiceId,
+      });
+      return res.status(500).json({ message: "Invoice PDF is corrupted" });
     }
 
     const filename = `Invoice_${invoice.invoiceNumber || invoice._id}.pdf`;
     res.setHeader("Content-Type", invoice.pdf.contentType || "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
-    return res.send(invoice.pdf.data);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    console.log("[invoice.controller] get-pdf: response headers", {
+      invoiceId,
+      "Content-Type": res.getHeader("Content-Type"),
+      "Content-Disposition": res.getHeader("Content-Disposition"),
+      "Content-Length": res.getHeader("Content-Length"),
+    });
+
+    // res.end(buffer) writes the exact bytes with no type-sniffing — unlike
+    // res.send(), which would fall back to JSON.stringify for anything it
+    // doesn't recognize as a Buffer/string.
+    return res.end(pdfBuffer);
   } catch (error) {
     if (error.name === "CastError") {
+      console.error("[invoice.controller] get-pdf: invalid invoice id", { invoiceId });
       return res.status(404).json({ message: "Invoice not found" });
     }
+    console.error("[invoice.controller] get-pdf failed:", { invoiceId, message: error.message, stack: error.stack });
     return res.status(500).json({ message: error.message || "Unable to load invoice PDF" });
   }
 };
