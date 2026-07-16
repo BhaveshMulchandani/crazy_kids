@@ -186,10 +186,16 @@ const listInvoices = async (req, res) => {
 // there is a single invoice template (the print one) instead of a
 // duplicate PDFKit-authored one.
 const uploadInvoicePdf = async (req, res) => {
-  try {
-    const { invoiceId } = req.params;
+  const { invoiceId } = req.params;
+  console.log("[invoice.controller] upload-pdf: invoked", {
+    invoiceId,
+    contentType: req.headers["content-type"],
+    bodyBytes: Buffer.isBuffer(req.body) ? req.body.length : 0,
+  });
 
+  try {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      console.error("[invoice.controller] upload-pdf: empty or non-buffer body", { invoiceId });
       return res.status(400).json({ message: "Invoice PDF file is required" });
     }
 
@@ -206,11 +212,18 @@ const uploadInvoicePdf = async (req, res) => {
     ).select("_id");
 
     if (!invoice) {
+      console.error("[invoice.controller] upload-pdf: invoice not found", { invoiceId });
       return res.status(404).json({ message: "Invoice not found" });
     }
 
+    console.log("[invoice.controller] upload-pdf: stored successfully", { invoiceId });
     return res.status(200).json({ message: "Invoice PDF stored successfully" });
   } catch (error) {
+    console.error("[invoice.controller] upload-pdf failed:", {
+      invoiceId,
+      message: error.message,
+      stack: error.stack,
+    });
     if (error.name === "CastError") {
       return res.status(404).json({ message: "Invoice not found" });
     }
@@ -254,15 +267,18 @@ const getInvoicePdf = async (req, res) => {
 // report success/failure. All WhatsApp-specific behavior lives in
 // whatsapp.service.js; this only gathers the data it needs.
 const sendInvoiceWhatsApp = async (req, res) => {
-  try {
-    const { invoiceId } = req.params;
+  const { invoiceId } = req.params;
+  console.log("[invoice.controller] send-whatsapp: invoked", { invoiceId });
 
+  try {
     const invoice = await Invoice.findById(invoiceId);
     if (!invoice) {
+      console.error("[invoice.controller] send-whatsapp: invoice not found", { invoiceId });
       return res.status(404).json({ message: "Invoice not found" });
     }
 
     if (!invoice.pdf?.data) {
+      console.error("[invoice.controller] send-whatsapp: no stored PDF for invoice", { invoiceId });
       return res.status(404).json({ message: "Invoice PDF not found." });
     }
 
@@ -270,31 +286,52 @@ const sendInvoiceWhatsApp = async (req, res) => {
 
     const parentName = session?.parentName || invoice.customer?.parentName || "";
     const mobileNumber = session?.mobileNumber || invoice.customer?.mobileNumber || "";
+    const rewardPoints = invoice.charges?.loyaltyPoints;
+    console.log("[invoice.controller] send-whatsapp: resolved recipient", {
+      invoiceId,
+      sessionId: invoice.session ? String(invoice.session) : null,
+      parentName,
+      mobileNumber,
+      rewardPoints,
+    });
 
     if (!mobileNumber?.trim()) {
+      console.error("[invoice.controller] send-whatsapp: mobile number missing", { invoiceId });
       return res.status(400).json({ message: "Customer mobile number not found." });
     }
 
     const publicBaseUrl = process.env.PUBLIC_BASE_URL;
     if (!publicBaseUrl?.trim()) {
+      console.error("[invoice.controller] send-whatsapp: PUBLIC_BASE_URL is not configured", { invoiceId });
       return res.status(404).json({ message: "Invoice PDF not found." });
     }
 
     const mediaUrl = `${publicBaseUrl.replace(/\/$/, "")}/invoice/${invoice._id}/pdf`;
+    console.log("[invoice.controller] send-whatsapp: generated media URL", { invoiceId, mediaUrl });
 
     const result = await whatsappService.sendInvoice({
       destination: mobileNumber,
       userName: parentName,
       invoiceNumber: invoice.invoiceNumber,
       grandTotal: invoice.charges?.grandTotal,
-      rewardPoints: invoice.charges?.loyaltyPoints,
+      rewardPoints,
       mediaUrl,
       mediaFilename: `Invoice_${invoice.invoiceNumber || invoice._id}.pdf`,
     });
 
+    console.log("[invoice.controller] send-whatsapp: succeeded", { invoiceId, data: result.data });
     return res.status(200).json({ message: "Invoice sent successfully on WhatsApp.", data: result.data });
   } catch (error) {
-    console.error("[invoice.controller] send-whatsapp failed:", error.message);
+    // Full error (message, statusCode if set by whatsapp.service.js, and
+    // stack) — never just error.message — so the actual cause is always
+    // visible here even though the HTTP response the frontend gets stays a
+    // plain { message } and the toast it shows stays generic.
+    console.error("[invoice.controller] send-whatsapp failed:", {
+      invoiceId,
+      message: error.message,
+      statusCode: error.statusCode,
+      stack: error.stack,
+    });
     return res.status(error.statusCode || 500).json({ message: error.message || "Unable to send invoice on WhatsApp." });
   }
 };

@@ -1038,6 +1038,15 @@ const InvoiceDialog = ({ invoice, onClose }) => {
       );
       toast.success(response.data?.message || "Invoice sent successfully on WhatsApp.");
     } catch (error) {
+      // Debug-only: the toast below stays generic on purpose, so the real
+      // reason (whichever of the two requests above failed — PDF upload or
+      // send-whatsapp) has to be visible here instead.
+      console.error("[sendWhatsApp] request failed", {
+        requestUrl: error?.config?.url,
+        responseStatus: error?.response?.status,
+        responseBody: error?.response?.data,
+        error,
+      });
       toast.error(error.response?.data?.message || "Failed to send invoice on WhatsApp");
     } finally {
       setSendingWhatsApp(false);

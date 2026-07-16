@@ -128,6 +128,13 @@ const sendInvoice = async ({ destination, userName, invoiceNumber, grandTotal, r
       (body && typeof body === "object" && (body.message || body.msg || body.error)) ||
       (typeof body === "string" && body) ||
       `WhatsApp API request failed with status ${response.status}`;
+    // Explicit, unambiguous failure log — the complete TrdAI error body,
+    // not just the derived `message` string being thrown.
+    console.error("[whatsapp.service] TrdAI reported failure", {
+      status: response.status,
+      body,
+      derivedMessage: message,
+    });
     const error = new Error(message);
     error.statusCode = response.status >= 400 ? response.status : 502;
     throw error;
