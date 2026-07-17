@@ -202,6 +202,9 @@ const toPdfBuffer = (value) => {
   return null;
 };
 
+// Every well-formed PDF starts with these exact bytes ("%PDF-").
+const PDF_MAGIC = "%PDF-";
+
 // Accepts the exact PDF bytes the frontend rendered from the same
 // #invoice-print markup the "Print invoice" button uses (see
 // Runningbills.jsx), and stores them as-is. No PDF generation happens on
