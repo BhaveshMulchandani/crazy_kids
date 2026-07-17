@@ -945,6 +945,76 @@ const invoiceTdStyle = {
   borderBottom: `1px solid ${INVOICE_BORDER}`,
 };
 
+// html2canvas (1.4.1, last released 2022) predates browser support for CSS
+// Color 4 functions and throws "Attempting to parse an unsupported color
+// function 'oklch'" the instant it meets one anywhere in the document it
+// clones. #invoice-print itself is hand-styled with plain hex (see
+// INVOICE_TEXT etc. above) specifically to avoid this, but html2canvas
+// clones the *whole* document (not just the target node) to preserve
+// layout/cascade context, so it still walks every other element on this
+// page — session cards, badges, buttons — which use Tailwind classes
+// resolving to the oklch(...) custom properties defined in
+// src/index.css's `:root` block (--primary, --border, --muted, etc.), plus
+// a couple of literal inline "oklch(...)" accent colors elsewhere in this
+// file. That's what aborted PDF generation before the upload request was
+// ever made — the network calls below never fired because this threw.
+//
+// Fix: on html2canvas's `onclone` callback, rewrite every oklch/oklab/
+// color()/color-mix() value it would encounter — root CSS variables and
+// any inline style="" attribute — to an equivalent rgb() string, but only
+// on the disposable cloned document html2canvas renders from. The live
+// page/theme is never touched, so nothing visibly changes. The conversion
+// itself uses the canvas 2D API purely as a browser-native color
+// normalizer: any color a browser can parse (oklch included) comes back
+// out of a canvas `fillStyle` getter as rgb()/rgba().
+const UNSUPPORTED_COLOR_FN = /(oklch|oklab|color-mix|color)\(/i;
+
+let colorConversionCtx = null;
+const toRgbColor = (colorString) => {
+  if (!colorConversionCtx) {
+    colorConversionCtx = document.createElement("canvas").getContext("2d");
+  }
+  colorConversionCtx.fillStyle = "#000000";
+  try {
+    colorConversionCtx.fillStyle = colorString;
+  } catch {
+    return null;
+  }
+  return colorConversionCtx.fillStyle;
+};
+
+const sanitizeUnsupportedColorsForHtml2Canvas = (clonedDoc) => {
+  // Root CSS custom properties: resolve real values from the live document
+  // (computed styles on the freshly-inserted clone can be unreliable) and
+  // reassign the oklch ones as rgb on the clone's root, so every class
+  // referencing var(--x) resolves to something html2canvas can parse.
+  const liveRootStyle = getComputedStyle(document.documentElement);
+  for (let i = 0; i < liveRootStyle.length; i++) {
+    const prop = liveRootStyle[i];
+    if (!prop.startsWith("--")) continue;
+    const value = liveRootStyle.getPropertyValue(prop).trim();
+    if (UNSUPPORTED_COLOR_FN.test(value)) {
+      const rgb = toRgbColor(value);
+      if (rgb) clonedDoc.documentElement.style.setProperty(prop, rgb);
+    }
+  }
+
+  // Literal inline oklch/etc. colors baked into a style="" attribute
+  // anywhere in the cloned document (e.g. the `accent="oklch(...)"` values
+  // used by session-card rows elsewhere in this file).
+  clonedDoc.querySelectorAll("[style]").forEach((el) => {
+    const style = el.style;
+    for (let i = style.length - 1; i >= 0; i--) {
+      const prop = style[i];
+      const value = style.getPropertyValue(prop);
+      if (value && UNSUPPORTED_COLOR_FN.test(value)) {
+        const rgb = toRgbColor(value);
+        if (rgb) style.setProperty(prop, rgb, style.getPropertyPriority(prop));
+      }
+    }
+  });
+};
+
 // Rasterizes the exact same #invoice-print DOM node the "Print invoice"
 // button reads (see `print()` below) into a PDF Blob, so the document sent
 // on WhatsApp is always visually identical to what gets printed — one
@@ -957,6 +1027,7 @@ const generateInvoicePdfBlob = async () => {
     scale: 2,
     backgroundColor: "#ffffff",
     useCORS: true,
+    onclone: sanitizeUnsupportedColorsForHtml2Canvas,
   });
 
   const imgData = canvas.toDataURL("image/png");
