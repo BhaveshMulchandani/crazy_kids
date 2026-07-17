@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import html2canvas from "html2canvas";
+import { toCanvas } from "html-to-image";
 import jsPDF from "jspdf";
 
 // Helper functions
@@ -945,219 +945,6 @@ const invoiceTdStyle = {
   borderBottom: `1px solid ${INVOICE_BORDER}`,
 };
 
-// html2canvas (1.4.1, last released 2022) predates browser support for CSS
-// Color 4 functions and throws "Attempting to parse an unsupported color
-// function 'oklch'" the instant it meets one anywhere in the document it
-// clones. #invoice-print itself is hand-styled with plain hex (see
-// INVOICE_TEXT etc. above) specifically to avoid this, but html2canvas
-// clones the *whole* document (not just the target node) to preserve
-// layout/cascade context, so it still walks every other element on this
-// page — session cards, badges, buttons — which use Tailwind classes
-// resolving to the oklch(...) custom properties defined in
-// src/index.css's `:root` block (--primary, --border, --muted, etc.), plus
-// a couple of literal inline "oklch(...)" accent colors elsewhere in this
-// file. That's what aborted PDF generation before the upload request was
-// ever made — the network calls below never fired because this threw.
-//
-// Fix: on html2canvas's `onclone` callback, rewrite every oklch/oklab/
-// color()/color-mix() occurrence it would encounter — inside stylesheet
-// rules (this is what actually matters: Tailwind compiles opacity-modifier
-// classes like `bg-primary/5` or `border-border/60` to
-// `color-mix(in oklab, var(--primary) 5%, transparent)`, and the blanket
-// `* { border-color: var(--color-border) }` base rule touches nearly every
-// element — a var()-only override can't neutralize a color-mix() call, and
-// getComputedStyle()'s indexed enumeration of custom properties isn't
-// reliable enough to depend on for finding the var() declarations either)
-// and inline style="" attributes — to an equivalent rgb() string. Only the
-// disposable cloned document/stylesheets html2canvas renders from are
-// touched; the live page/theme is never mutated, so nothing visibly
-// changes. Conversion uses the canvas 2D API purely as a browser-native
-// color normalizer: any color a browser can parse (oklch, color-mix, etc.)
-// comes back out of a canvas `fillStyle` getter as rgb()/rgba().
-const UNSUPPORTED_COLOR_FN_SOURCE = "\\b(oklch|oklab|color-mix|color)\\(";
-const UNSUPPORTED_COLOR_FN_TEST = new RegExp(UNSUPPORTED_COLOR_FN_SOURCE, "i");
-
-let colorConversionCtx = null;
-const toRgbColor = (colorString) => {
-  if (!colorConversionCtx) {
-    colorConversionCtx = document.createElement("canvas").getContext("2d");
-  }
-  colorConversionCtx.fillStyle = "#000000";
-  try {
-    colorConversionCtx.fillStyle = colorString;
-  } catch {
-    return null;
-  }
-  // An unparseable value is silently ignored by the fillStyle setter (no
-  // exception thrown), leaving the "#000000" reset in place. Treating that
-  // as-is is fine here: worst case a genuinely-unparseable color renders as
-  // black in the PDF rather than crashing the whole capture.
-  return colorConversionCtx.fillStyle;
-};
-
-// Finds the index just past the closing ")" that matches the "(" at
-// `openParenIndex`, respecting nesting (color-mix() nests var() calls).
-const findMatchingParenEnd = (text, openParenIndex) => {
-  let depth = 1;
-  let i = openParenIndex + 1;
-  while (i < text.length && depth > 0) {
-    if (text[i] === "(") depth++;
-    else if (text[i] === ")") depth--;
-    i++;
-  }
-  return i;
-};
-
-// Rewrites every oklch()/oklab()/color()/color-mix() occurrence in a CSS
-// text blob to an rgb() equivalent. `varOverrides` (custom-property name ->
-// rgb string) is substituted first so a function referencing a still-oklch
-// variable (e.g. Tailwind's `color-mix(in oklab, var(--primary) 5%,
-// transparent)` opacity-modifier output) has concrete, canvas-parseable
-// arguments before conversion is attempted.
-const rewriteUnsupportedColorsInText = (text, varOverrides) => {
-  let source = text;
-  for (const [name, rgb] of Object.entries(varOverrides)) {
-    source = source.split(`var(${name})`).join(rgb);
-  }
-
-  const matcher = new RegExp(UNSUPPORTED_COLOR_FN_SOURCE, "gi");
-  if (!matcher.test(source)) return source;
-  matcher.lastIndex = 0;
-
-  let result = "";
-  let cursor = 0;
-  let match;
-  while ((match = matcher.exec(source))) {
-    const start = match.index;
-    const openParenIndex = matcher.lastIndex - 1;
-    const end = findMatchingParenEnd(source, openParenIndex);
-    const fnText = source.slice(start, end);
-    const rgb = toRgbColor(fnText);
-    result += source.slice(cursor, start) + (rgb || fnText);
-    cursor = end;
-    matcher.lastIndex = end;
-  }
-  result += source.slice(cursor);
-  return result;
-};
-
-// Visits every CSSStyleRule/CSSKeyframeRule reachable from `styleSheets`,
-// recursing into grouping rules (@media, @supports, @layer, @keyframes).
-const forEachStyleRule = (styleSheets, callback) => {
-  const visitRuleList = (rules) => {
-    for (const rule of Array.from(rules)) {
-      if (rule.cssRules) visitRuleList(rule.cssRules);
-      if (rule.style) callback(rule);
-    }
-  };
-  for (const sheet of Array.from(styleSheets)) {
-    let rules;
-    try {
-      rules = sheet.cssRules;
-    } catch {
-      continue; // cross-origin stylesheet — can't read or rewrite its rules
-    }
-    if (rules) visitRuleList(rules);
-  }
-};
-
-// Reads this app's `:root`/`html` custom-property color declarations
-// straight from the live document's CSSOM (authored declarations, not
-// computed style — reliable across browsers for custom properties) and
-// returns a { "--name": "rgb(...)" } map for every one that isn't already
-// html2canvas-safe.
-const collectRootColorVarOverrides = () => {
-  const overrides = {};
-  const rootSelector = /(^|,)\s*(:root|html)\s*($|,)/i;
-  forEachStyleRule(document.styleSheets, (rule) => {
-    if (!rule.selectorText || !rootSelector.test(rule.selectorText)) return;
-    for (let i = 0; i < rule.style.length; i++) {
-      const prop = rule.style[i];
-      if (!prop.startsWith("--")) continue;
-      const value = rule.style.getPropertyValue(prop).trim();
-      if (UNSUPPORTED_COLOR_FN_TEST.test(value)) {
-        // rewriteUnsupportedColorsInText already returns a fully converted
-        // value — including composite ones like --gradient-hero/--shadow-*
-        // (a gradient/shadow *containing* oklch() stops, not a bare color).
-        // Re-wrapping that in toRgbColor was a bug: canvas's fillStyle only
-        // accepts a single flat <color>, so handing it a whole
-        // "radial-gradient(...)" string silently failed and collapsed the
-        // variable to solid black instead of preserving the gradient with
-        // its stops converted.
-        overrides[prop] = rewriteUnsupportedColorsInText(value, overrides);
-      }
-    }
-  });
-  return overrides;
-};
-
-const sanitizeUnsupportedColorsForHtml2Canvas = (clonedDoc) => {
-  const varOverrides = collectRootColorVarOverrides();
-
-  // Belt-and-braces: also set the resolved values directly on the clone's
-  // root so anything referencing var(--x) without going through a rewritten
-  // stylesheet rule (there shouldn't be any left after the sweep below,
-  // but this costs nothing) still resolves to something parseable.
-  Object.entries(varOverrides).forEach(([prop, rgb]) => {
-    clonedDoc.documentElement.style.setProperty(prop, rgb);
-  });
-
-  // html2canvas calls parseBackgroundColor() unconditionally on every
-  // capture — *including* when foreignObjectRendering is on — which reads
-  // getComputedStyle(ownerDocument.documentElement).backgroundColor and
-  // ...body.backgroundColor and feeds them straight into its own color
-  // parser before any rendering path branches. index.css's
-  // `html, body { background: var(--color-background); color:
-  // var(--color-foreground); }` rule means those computed values resolve
-  // to oklch(...) even after the var overrides above, if the browser
-  // doesn't flatten the color-mix()/var() chain the way we'd expect this
-  // is the one spot that must be pinned directly rather than relying on
-  // custom-property cascade resolution, since it runs unconditionally on
-  // every single send. Read the *live* page's already-fully-resolved
-  // computed color (getComputedStyle always resolves var() chains down to
-  // a single concrete color, whatever function that color is expressed
-  // in) and set it as a direct, non-custom-property inline override.
-  ["documentElement", "body"].forEach((key) => {
-    const liveEl = document[key];
-    if (!liveEl) return;
-    const liveStyle = getComputedStyle(liveEl);
-    const bg = toRgbColor(liveStyle.backgroundColor);
-    const fg = toRgbColor(liveStyle.color);
-    const cloneEl = clonedDoc[key];
-    if (!cloneEl) return;
-    if (bg) cloneEl.style.setProperty("background-color", bg, "important");
-    if (fg) cloneEl.style.setProperty("color", fg, "important");
-  });
-
-  // The actual fix: rewrite every stylesheet rule's declarations in the
-  // clone, including Tailwind's generated opacity-modifier utility classes
-  // (`color-mix(in oklab, var(--primary) 5%, transparent)`) and the
-  // blanket `* { border-color: var(--color-border) }` base rule.
-  forEachStyleRule(clonedDoc.styleSheets, (rule) => {
-    if (!UNSUPPORTED_COLOR_FN_TEST.test(rule.style.cssText)) return;
-    try {
-      rule.style.cssText = rewriteUnsupportedColorsInText(rule.style.cssText, varOverrides);
-    } catch {
-      // Leave the rule as-is rather than let a reassignment failure abort
-      // the whole capture.
-    }
-  });
-
-  // Literal inline oklch/etc. colors baked into a style="" attribute
-  // anywhere in the cloned document (e.g. the `accent="oklch(...)"` values
-  // used by session-card rows elsewhere in this file).
-  clonedDoc.querySelectorAll("[style]").forEach((el) => {
-    const style = el.style;
-    for (let i = style.length - 1; i >= 0; i--) {
-      const prop = style[i];
-      const value = style.getPropertyValue(prop);
-      if (value && UNSUPPORTED_COLOR_FN_TEST.test(value)) {
-        const rewritten = rewriteUnsupportedColorsInText(value, varOverrides);
-        style.setProperty(prop, rewritten, style.getPropertyPriority(prop));
-      }
-    }
-  });
-};
 
 // Rasterizes the exact same #invoice-print DOM node the "Print invoice"
 // button reads (see `print()` below) into a PDF Blob, so the document sent
@@ -1167,20 +954,20 @@ const generateInvoicePdfBlob = async () => {
   const node = document.getElementById("invoice-print");
   if (!node) return null;
 
-  const canvas = await html2canvas(node, {
-    scale: 2,
+  // html-to-image serializes the node into an SVG <foreignObject> and lets
+  // the browser's own engine paint it, so modern CSS (oklch(), color-mix(),
+  // etc.) renders natively — html2canvas's hand-rolled CSS parser used to
+  // throw "unsupported color function" here before the upload request could
+  // ever fire. It also clones only this node rather than the whole
+  // document, so styling anywhere else on the page can't break capture.
+  const canvas = await toCanvas(node, {
+    pixelRatio: 2,
     backgroundColor: "#ffffff",
-    useCORS: true,
-    // Renders via an SVG <foreignObject> so the *browser's own* renderer
-    // paints the node — including any oklch()/color-mix() colors it
-    // resolves natively — instead of html2canvas's hand-rolled CSS parser
-    // (the one throwing "unsupported color function"). The onclone
-    // sanitizer below is kept as a fallback for the rare environment where
-    // html2canvas detects foreignObject isn't safe to use and silently
-    // reverts to its own parser-based canvas path.
-    foreignObjectRendering: true,
-    onclone: sanitizeUnsupportedColorsForHtml2Canvas,
   });
+
+  if (!canvas.width || !canvas.height) {
+    throw new Error("Invoice capture produced an empty image (invoice not visible?)");
+  }
 
   const imgData = canvas.toDataURL("image/png");
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
@@ -1246,7 +1033,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
         return;
       }
 
-      // Diagnostic only — confirms the blob html2canvas/jsPDF produced is
+      // Diagnostic only — confirms the blob the capture/jsPDF step produced is
       // actually a well-formed, non-empty PDF *before* it's uploaded, so a
       // corruption report can be narrowed to "client never made a valid PDF"
       // vs. "something downstream mangled it".
