@@ -1076,8 +1076,15 @@ const collectRootColorVarOverrides = () => {
       if (!prop.startsWith("--")) continue;
       const value = rule.style.getPropertyValue(prop).trim();
       if (UNSUPPORTED_COLOR_FN_TEST.test(value)) {
-        const rgb = toRgbColor(rewriteUnsupportedColorsInText(value, overrides));
-        if (rgb) overrides[prop] = rgb;
+        // rewriteUnsupportedColorsInText already returns a fully converted
+        // value — including composite ones like --gradient-hero/--shadow-*
+        // (a gradient/shadow *containing* oklch() stops, not a bare color).
+        // Re-wrapping that in toRgbColor was a bug: canvas's fillStyle only
+        // accepts a single flat <color>, so handing it a whole
+        // "radial-gradient(...)" string silently failed and collapsed the
+        // variable to solid black instead of preserving the gradient with
+        // its stops converted.
+        overrides[prop] = rewriteUnsupportedColorsInText(value, overrides);
       }
     }
   });
@@ -1093,6 +1100,33 @@ const sanitizeUnsupportedColorsForHtml2Canvas = (clonedDoc) => {
   // but this costs nothing) still resolves to something parseable.
   Object.entries(varOverrides).forEach(([prop, rgb]) => {
     clonedDoc.documentElement.style.setProperty(prop, rgb);
+  });
+
+  // html2canvas calls parseBackgroundColor() unconditionally on every
+  // capture — *including* when foreignObjectRendering is on — which reads
+  // getComputedStyle(ownerDocument.documentElement).backgroundColor and
+  // ...body.backgroundColor and feeds them straight into its own color
+  // parser before any rendering path branches. index.css's
+  // `html, body { background: var(--color-background); color:
+  // var(--color-foreground); }` rule means those computed values resolve
+  // to oklch(...) even after the var overrides above, if the browser
+  // doesn't flatten the color-mix()/var() chain the way we'd expect this
+  // is the one spot that must be pinned directly rather than relying on
+  // custom-property cascade resolution, since it runs unconditionally on
+  // every single send. Read the *live* page's already-fully-resolved
+  // computed color (getComputedStyle always resolves var() chains down to
+  // a single concrete color, whatever function that color is expressed
+  // in) and set it as a direct, non-custom-property inline override.
+  ["documentElement", "body"].forEach((key) => {
+    const liveEl = document[key];
+    if (!liveEl) return;
+    const liveStyle = getComputedStyle(liveEl);
+    const bg = toRgbColor(liveStyle.backgroundColor);
+    const fg = toRgbColor(liveStyle.color);
+    const cloneEl = clonedDoc[key];
+    if (!cloneEl) return;
+    if (bg) cloneEl.style.setProperty("background-color", bg, "important");
+    if (fg) cloneEl.style.setProperty("color", fg, "important");
   });
 
   // The actual fix: rewrite every stylesheet rule's declarations in the
@@ -1137,6 +1171,14 @@ const generateInvoicePdfBlob = async () => {
     scale: 2,
     backgroundColor: "#ffffff",
     useCORS: true,
+    // Renders via an SVG <foreignObject> so the *browser's own* renderer
+    // paints the node — including any oklch()/color-mix() colors it
+    // resolves natively — instead of html2canvas's hand-rolled CSS parser
+    // (the one throwing "unsupported color function"). The onclone
+    // sanitizer below is kept as a fallback for the rare environment where
+    // html2canvas detects foreignObject isn't safe to use and silently
+    // reverts to its own parser-based canvas path.
+    foreignObjectRendering: true,
     onclone: sanitizeUnsupportedColorsForHtml2Canvas,
   });
 
