@@ -1023,6 +1023,29 @@ const InvoiceDialog = ({ invoice, onClose }) => {
         return;
       }
 
+      // Diagnostic only — confirms the blob html2canvas/jsPDF produced is
+      // actually a well-formed, non-empty PDF *before* it's uploaded, so a
+      // corruption report can be narrowed to "client never made a valid PDF"
+      // vs. "something downstream mangled it".
+      const first20 = new Uint8Array(await pdfBlob.slice(0, 20).arrayBuffer());
+      const first20Ascii = Array.from(first20).map((b) => String.fromCharCode(b)).join("");
+      console.log("[sendWhatsApp] generated PDF blob", {
+        size: pdfBlob.size,
+        type: pdfBlob.type,
+        first20Bytes: Array.from(first20),
+        first20BytesAscii: first20Ascii,
+        isValidPdf: first20Ascii.startsWith("%PDF-"),
+      });
+
+      if (pdfBlob.size === 0) {
+        toast.error("Generated invoice PDF is empty");
+        return;
+      }
+      if (!first20Ascii.startsWith("%PDF-")) {
+        toast.error("Generated invoice PDF is not valid");
+        return;
+      }
+
       // Upload the print-identical PDF first so it's in place before the
       // WhatsApp trigger asks TrdAI to fetch it.
       await axios.post(

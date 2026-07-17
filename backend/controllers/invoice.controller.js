@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const Invoice = require("../models/invoice.model");
 const Session = require("../models/session.model");
 const KOT = require("../models/cafe.model");
@@ -179,6 +180,28 @@ const listInvoices = async (req, res) => {
   }
 };
 
+// Buffer-schema fields don't always come back from Mongoose as a true
+// Node Buffer — depending on the driver/lean() path they can surface as the
+// JSON-round-tripped { type: "Buffer", data: [...] } shape, or a BSON
+// Binary wrapper. This matters a lot here: if a non-Buffer object were ever
+// handed to res.send(), Express silently JSON.stringifies it via res.json()
+// while the Content-Type header (already set to application/pdf at that
+// point) is left untouched — so the response claims to be a PDF but its
+// body actually starts with "{", which is exactly what "Failed to load
+// PDF" in a browser looks like. Coerce to a real Buffer no matter which
+// shape we got, so that failure mode can't happen.
+const toPdfBuffer = (value) => {
+  if (Buffer.isBuffer(value)) return value;
+  if (!value) return null;
+  if (typeof value.buffer === "function") return Buffer.from(value.buffer()); // BSON Binary
+  if (typeof value.value === "function") return Buffer.from(value.value(true)); // older BSON Binary
+  if (Array.isArray(value.data)) return Buffer.from(value.data); // {type:"Buffer",data:[...]}
+  if (value.buffer instanceof ArrayBuffer) {
+    return Buffer.from(value.buffer, value.byteOffset || 0, value.byteLength ?? value.buffer.byteLength);
+  }
+  return null;
+};
+
 // Accepts the exact PDF bytes the frontend rendered from the same
 // #invoice-print markup the "Print invoice" button uses (see
 // Runningbills.jsx), and stores them as-is. No PDF generation happens on
@@ -203,16 +226,31 @@ const uploadInvoicePdf = async (req, res) => {
     // moment they're received, so a corrupt PDF on GET can be traced back
     // to "the client sent bad bytes" vs. "storage/retrieval corrupted
     // them" instead of guessing.
-    const uploadFirst10 = req.body.subarray(0, 10);
+    const uploadFirst20 = req.body.subarray(0, 20);
+    const uploadIsValidPdf = req.body.subarray(0, PDF_MAGIC.length).toString("latin1") === PDF_MAGIC;
     console.log("[invoice.controller] upload-pdf: received buffer", {
       invoiceId,
       sizeBytes: req.body.length,
-      first10Bytes: Array.from(uploadFirst10),
-      first10BytesAscii: uploadFirst10.toString("latin1"),
-      isValidPdf: req.body.subarray(0, 5).toString("latin1") === "%PDF-",
+      first20Bytes: Array.from(uploadFirst20),
+      first20BytesAscii: uploadFirst20.toString("latin1"),
+      isValidPdf: uploadIsValidPdf,
     });
 
-    const invoice = await Invoice.findByIdAndUpdate(
+    // Reject up front rather than storing bytes we already know aren't a
+    // PDF — the client-side check in Runningbills.jsx should catch this
+    // first, but a server-side gate means a bad blob can never make it into
+    // storage regardless of what the client sends.
+    if (!uploadIsValidPdf) {
+      console.error("[invoice.controller] upload-pdf: rejected — body does not start with %PDF-", {
+        invoiceId,
+        first20BytesAscii: uploadFirst20.toString("latin1"),
+      });
+      return res.status(400).json({ message: "Uploaded file is not a valid PDF (missing %PDF- header)" });
+    }
+
+    const uploadedLength = req.body.length;
+
+    await Invoice.findByIdAndUpdate(
       invoiceId,
       {
         pdf: {
@@ -224,12 +262,41 @@ const uploadInvoicePdf = async (req, res) => {
       { new: true }
     ).select("_id");
 
-    if (!invoice) {
+    // Step 3 verification: don't trust that the write landed the way we
+    // sent it — re-read the document from Mongo and compare length + magic
+    // bytes against what was uploaded, so silent corruption in the
+    // write/driver layer is caught here instead of surfacing later as a
+    // TrdAI "invalid media" failure.
+    const stored = await Invoice.findById(invoiceId).select("pdf").lean();
+    if (!stored) {
       console.error("[invoice.controller] upload-pdf: invoice not found", { invoiceId });
       return res.status(404).json({ message: "Invoice not found" });
     }
 
-    console.log("[invoice.controller] upload-pdf: stored successfully", { invoiceId });
+    const storedBuffer = toPdfBuffer(stored.pdf?.data);
+    const storedIsValidPdf = Boolean(
+      storedBuffer && storedBuffer.subarray(0, PDF_MAGIC.length).toString("latin1") === PDF_MAGIC
+    );
+    const readbackMatches = Boolean(storedBuffer && storedBuffer.length === uploadedLength && storedIsValidPdf);
+    console.log("[invoice.controller] upload-pdf: readback verification", {
+      invoiceId,
+      uploadedLength,
+      storedLength: storedBuffer?.length ?? null,
+      storedIsValidPdf,
+      readbackMatches,
+    });
+
+    if (!readbackMatches) {
+      console.error("[invoice.controller] upload-pdf: readback verification FAILED — stored bytes do not match upload", {
+        invoiceId,
+        uploadedLength,
+        storedLength: storedBuffer?.length ?? null,
+        storedIsValidPdf,
+      });
+      return res.status(500).json({ message: "Stored PDF is corrupted (readback verification failed)" });
+    }
+
+    console.log("[invoice.controller] upload-pdf: stored and verified successfully", { invoiceId, uploadedLength });
     return res.status(200).json({ message: "Invoice PDF stored successfully" });
   } catch (error) {
     console.error("[invoice.controller] upload-pdf failed:", {
@@ -243,30 +310,6 @@ const uploadInvoicePdf = async (req, res) => {
     return res.status(500).json({ message: error.message || "Unable to store invoice PDF" });
   }
 };
-
-// Buffer-schema fields don't always come back from Mongoose as a true
-// Node Buffer — depending on the driver/lean() path they can surface as the
-// JSON-round-tripped { type: "Buffer", data: [...] } shape, or a BSON
-// Binary wrapper. This matters a lot here: if a non-Buffer object were ever
-// handed to res.send(), Express silently JSON.stringifies it via res.json()
-// while the Content-Type header (already set to application/pdf at that
-// point) is left untouched — so the response claims to be a PDF but its
-// body actually starts with "{", which is exactly what "Failed to load
-// PDF" in a browser looks like. Coerce to a real Buffer no matter which
-// shape we got, so that failure mode can't happen.
-const toPdfBuffer = (value) => {
-  if (Buffer.isBuffer(value)) return value;
-  if (!value) return null;
-  if (typeof value.buffer === "function") return Buffer.from(value.buffer()); // BSON Binary
-  if (typeof value.value === "function") return Buffer.from(value.value(true)); // older BSON Binary
-  if (Array.isArray(value.data)) return Buffer.from(value.data); // {type:"Buffer",data:[...]}
-  if (value.buffer instanceof ArrayBuffer) {
-    return Buffer.from(value.buffer, value.byteOffset || 0, value.byteLength ?? value.buffer.byteLength);
-  }
-  return null;
-};
-
-const PDF_MAGIC = "%PDF-";
 
 // Public (no auth) by design — TrdAI's servers fetch this URL directly to
 // attach the PDF to the WhatsApp message, so it can't require a session
@@ -328,11 +371,15 @@ const getInvoicePdf = async (req, res) => {
     res.setHeader("Content-Type", invoice.pdf.contentType || "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
     res.setHeader("Content-Length", pdfBuffer.length);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-cache");
     console.log("[invoice.controller] get-pdf: response headers", {
       invoiceId,
       "Content-Type": res.getHeader("Content-Type"),
       "Content-Disposition": res.getHeader("Content-Disposition"),
       "Content-Length": res.getHeader("Content-Length"),
+      "Accept-Ranges": res.getHeader("Accept-Ranges"),
+      "Cache-Control": res.getHeader("Cache-Control"),
     });
 
     // res.end(buffer) writes the exact bytes with no type-sniffing — unlike
@@ -349,8 +396,88 @@ const getInvoicePdf = async (req, res) => {
   }
 };
 
+// Step 5/6 verification: fetches the exact URL TrdAI is about to be handed
+// and confirms it actually serves the same PDF we have stored, *before*
+// spending a TrdAI call on it. This is what turns an opaque "TrdAI rejected
+// media" or "failed to send" into an actionable reason (404, wrong
+// content-type, HTML error page instead of a PDF, or a byte-level mismatch
+// against what's in Mongo) — and it catches corruption introduced by
+// anything between storage and the public response (proxy, header
+// mangling, etc.), not just corruption at upload time.
+const verifyPublicPdfUrl = async ({ mediaUrl, expectedBuffer, invoiceId }) => {
+  let response;
+  try {
+    response = await fetch(mediaUrl, { signal: AbortSignal.timeout(15000) });
+  } catch (networkError) {
+    console.error("[invoice.controller] send-whatsapp: media URL self-check network error", {
+      invoiceId,
+      mediaUrl,
+      name: networkError.name,
+      message: networkError.message,
+    });
+    const error = new Error(
+      networkError.name === "TimeoutError"
+        ? "Public PDF URL timed out — TrdAI would not be able to fetch it either."
+        : "Public PDF URL is not reachable from the server."
+    );
+    error.statusCode = 502;
+    throw error;
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  const bodyBuffer = Buffer.from(await response.arrayBuffer());
+  const bodyFirst20 = bodyBuffer.subarray(0, 20);
+  const bodyIsValidPdf = bodyBuffer.subarray(0, PDF_MAGIC.length).toString("latin1") === PDF_MAGIC;
+  const expectedHash = crypto.createHash("sha256").update(expectedBuffer).digest("hex");
+  const bodyHash = crypto.createHash("sha256").update(bodyBuffer).digest("hex");
+  const hashesMatch = expectedHash === bodyHash;
+
+  console.log("[invoice.controller] send-whatsapp: media URL self-check", {
+    invoiceId,
+    mediaUrl,
+    httpStatus: response.status,
+    contentType,
+    bodySizeBytes: bodyBuffer.length,
+    expectedSizeBytes: expectedBuffer.length,
+    bodyFirst20BytesAscii: bodyFirst20.toString("latin1"),
+    bodyIsValidPdf,
+    expectedHash,
+    bodyHash,
+    hashesMatch,
+  });
+
+  if (response.status === 404) {
+    const error = new Error("Public PDF URL returned 404 — the invoice PDF is not accessible at that address.");
+    error.statusCode = 502;
+    throw error;
+  }
+  if (!response.ok) {
+    const error = new Error(`Public PDF URL returned HTTP ${response.status}.`);
+    error.statusCode = 502;
+    throw error;
+  }
+  if (contentType && !contentType.toLowerCase().includes("application/pdf")) {
+    const error = new Error(
+      `Public PDF URL returned Content-Type "${contentType}" instead of application/pdf — it likely served an HTML error page instead of the PDF.`
+    );
+    error.statusCode = 502;
+    throw error;
+  }
+  if (!bodyIsValidPdf) {
+    const error = new Error("Public PDF URL did not return a valid PDF (missing %PDF- header) — stored PDF may be corrupted.");
+    error.statusCode = 502;
+    throw error;
+  }
+  if (!hashesMatch) {
+    const error = new Error("Public PDF URL served different bytes than what is stored — the PDF was altered somewhere between storage and delivery.");
+    error.statusCode = 502;
+    throw error;
+  }
+};
+
 // Receive invoice id -> fetch invoice -> fetch session -> fetch parent
-// name/mobile/reward points -> locate the public PDF url -> call TrdAI ->
+// name/mobile/reward points -> locate the public PDF url -> verify the
+// public URL actually serves the exact stored bytes -> call TrdAI ->
 // report success/failure. All WhatsApp-specific behavior lives in
 // whatsapp.service.js; this only gathers the data it needs.
 const sendInvoiceWhatsApp = async (req, res) => {
@@ -395,6 +522,14 @@ const sendInvoiceWhatsApp = async (req, res) => {
 
     const mediaUrl = `${publicBaseUrl.replace(/\/$/, "")}/invoice/${invoice._id}/pdf`;
     console.log("[invoice.controller] send-whatsapp: generated media URL", { invoiceId, mediaUrl });
+
+    const expectedBuffer = toPdfBuffer(invoice.pdf.data);
+    if (!expectedBuffer || expectedBuffer.length === 0) {
+      console.error("[invoice.controller] send-whatsapp: stored PDF could not be read as a buffer", { invoiceId });
+      return res.status(500).json({ message: "Stored PDF is corrupted." });
+    }
+
+    await verifyPublicPdfUrl({ mediaUrl, expectedBuffer, invoiceId });
 
     const result = await whatsappService.sendInvoice({
       destination: mobileNumber,
