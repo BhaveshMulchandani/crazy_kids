@@ -960,14 +960,22 @@ const invoiceTdStyle = {
 // ever made — the network calls below never fired because this threw.
 //
 // Fix: on html2canvas's `onclone` callback, rewrite every oklch/oklab/
-// color()/color-mix() value it would encounter — root CSS variables and
-// any inline style="" attribute — to an equivalent rgb() string, but only
-// on the disposable cloned document html2canvas renders from. The live
-// page/theme is never touched, so nothing visibly changes. The conversion
-// itself uses the canvas 2D API purely as a browser-native color
-// normalizer: any color a browser can parse (oklch included) comes back
-// out of a canvas `fillStyle` getter as rgb()/rgba().
-const UNSUPPORTED_COLOR_FN = /(oklch|oklab|color-mix|color)\(/i;
+// color()/color-mix() occurrence it would encounter — inside stylesheet
+// rules (this is what actually matters: Tailwind compiles opacity-modifier
+// classes like `bg-primary/5` or `border-border/60` to
+// `color-mix(in oklab, var(--primary) 5%, transparent)`, and the blanket
+// `* { border-color: var(--color-border) }` base rule touches nearly every
+// element — a var()-only override can't neutralize a color-mix() call, and
+// getComputedStyle()'s indexed enumeration of custom properties isn't
+// reliable enough to depend on for finding the var() declarations either)
+// and inline style="" attributes — to an equivalent rgb() string. Only the
+// disposable cloned document/stylesheets html2canvas renders from are
+// touched; the live page/theme is never mutated, so nothing visibly
+// changes. Conversion uses the canvas 2D API purely as a browser-native
+// color normalizer: any color a browser can parse (oklch, color-mix, etc.)
+// comes back out of a canvas `fillStyle` getter as rgb()/rgba().
+const UNSUPPORTED_COLOR_FN_SOURCE = "\\b(oklch|oklab|color-mix|color)\\(";
+const UNSUPPORTED_COLOR_FN_TEST = new RegExp(UNSUPPORTED_COLOR_FN_SOURCE, "i");
 
 let colorConversionCtx = null;
 const toRgbColor = (colorString) => {
@@ -980,24 +988,126 @@ const toRgbColor = (colorString) => {
   } catch {
     return null;
   }
+  // An unparseable value is silently ignored by the fillStyle setter (no
+  // exception thrown), leaving the "#000000" reset in place. Treating that
+  // as-is is fine here: worst case a genuinely-unparseable color renders as
+  // black in the PDF rather than crashing the whole capture.
   return colorConversionCtx.fillStyle;
 };
 
-const sanitizeUnsupportedColorsForHtml2Canvas = (clonedDoc) => {
-  // Root CSS custom properties: resolve real values from the live document
-  // (computed styles on the freshly-inserted clone can be unreliable) and
-  // reassign the oklch ones as rgb on the clone's root, so every class
-  // referencing var(--x) resolves to something html2canvas can parse.
-  const liveRootStyle = getComputedStyle(document.documentElement);
-  for (let i = 0; i < liveRootStyle.length; i++) {
-    const prop = liveRootStyle[i];
-    if (!prop.startsWith("--")) continue;
-    const value = liveRootStyle.getPropertyValue(prop).trim();
-    if (UNSUPPORTED_COLOR_FN.test(value)) {
-      const rgb = toRgbColor(value);
-      if (rgb) clonedDoc.documentElement.style.setProperty(prop, rgb);
-    }
+// Finds the index just past the closing ")" that matches the "(" at
+// `openParenIndex`, respecting nesting (color-mix() nests var() calls).
+const findMatchingParenEnd = (text, openParenIndex) => {
+  let depth = 1;
+  let i = openParenIndex + 1;
+  while (i < text.length && depth > 0) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")") depth--;
+    i++;
   }
+  return i;
+};
+
+// Rewrites every oklch()/oklab()/color()/color-mix() occurrence in a CSS
+// text blob to an rgb() equivalent. `varOverrides` (custom-property name ->
+// rgb string) is substituted first so a function referencing a still-oklch
+// variable (e.g. Tailwind's `color-mix(in oklab, var(--primary) 5%,
+// transparent)` opacity-modifier output) has concrete, canvas-parseable
+// arguments before conversion is attempted.
+const rewriteUnsupportedColorsInText = (text, varOverrides) => {
+  let source = text;
+  for (const [name, rgb] of Object.entries(varOverrides)) {
+    source = source.split(`var(${name})`).join(rgb);
+  }
+
+  const matcher = new RegExp(UNSUPPORTED_COLOR_FN_SOURCE, "gi");
+  if (!matcher.test(source)) return source;
+  matcher.lastIndex = 0;
+
+  let result = "";
+  let cursor = 0;
+  let match;
+  while ((match = matcher.exec(source))) {
+    const start = match.index;
+    const openParenIndex = matcher.lastIndex - 1;
+    const end = findMatchingParenEnd(source, openParenIndex);
+    const fnText = source.slice(start, end);
+    const rgb = toRgbColor(fnText);
+    result += source.slice(cursor, start) + (rgb || fnText);
+    cursor = end;
+    matcher.lastIndex = end;
+  }
+  result += source.slice(cursor);
+  return result;
+};
+
+// Visits every CSSStyleRule/CSSKeyframeRule reachable from `styleSheets`,
+// recursing into grouping rules (@media, @supports, @layer, @keyframes).
+const forEachStyleRule = (styleSheets, callback) => {
+  const visitRuleList = (rules) => {
+    for (const rule of Array.from(rules)) {
+      if (rule.cssRules) visitRuleList(rule.cssRules);
+      if (rule.style) callback(rule);
+    }
+  };
+  for (const sheet of Array.from(styleSheets)) {
+    let rules;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue; // cross-origin stylesheet — can't read or rewrite its rules
+    }
+    if (rules) visitRuleList(rules);
+  }
+};
+
+// Reads this app's `:root`/`html` custom-property color declarations
+// straight from the live document's CSSOM (authored declarations, not
+// computed style — reliable across browsers for custom properties) and
+// returns a { "--name": "rgb(...)" } map for every one that isn't already
+// html2canvas-safe.
+const collectRootColorVarOverrides = () => {
+  const overrides = {};
+  const rootSelector = /(^|,)\s*(:root|html)\s*($|,)/i;
+  forEachStyleRule(document.styleSheets, (rule) => {
+    if (!rule.selectorText || !rootSelector.test(rule.selectorText)) return;
+    for (let i = 0; i < rule.style.length; i++) {
+      const prop = rule.style[i];
+      if (!prop.startsWith("--")) continue;
+      const value = rule.style.getPropertyValue(prop).trim();
+      if (UNSUPPORTED_COLOR_FN_TEST.test(value)) {
+        const rgb = toRgbColor(rewriteUnsupportedColorsInText(value, overrides));
+        if (rgb) overrides[prop] = rgb;
+      }
+    }
+  });
+  return overrides;
+};
+
+const sanitizeUnsupportedColorsForHtml2Canvas = (clonedDoc) => {
+  const varOverrides = collectRootColorVarOverrides();
+
+  // Belt-and-braces: also set the resolved values directly on the clone's
+  // root so anything referencing var(--x) without going through a rewritten
+  // stylesheet rule (there shouldn't be any left after the sweep below,
+  // but this costs nothing) still resolves to something parseable.
+  Object.entries(varOverrides).forEach(([prop, rgb]) => {
+    clonedDoc.documentElement.style.setProperty(prop, rgb);
+  });
+
+  // The actual fix: rewrite every stylesheet rule's declarations in the
+  // clone, including Tailwind's generated opacity-modifier utility classes
+  // (`color-mix(in oklab, var(--primary) 5%, transparent)`) and the
+  // blanket `* { border-color: var(--color-border) }` base rule.
+  forEachStyleRule(clonedDoc.styleSheets, (rule) => {
+    if (!UNSUPPORTED_COLOR_FN_TEST.test(rule.style.cssText)) return;
+    try {
+      rule.style.cssText = rewriteUnsupportedColorsInText(rule.style.cssText, varOverrides);
+    } catch {
+      // Leave the rule as-is rather than let a reassignment failure abort
+      // the whole capture.
+    }
+  });
 
   // Literal inline oklch/etc. colors baked into a style="" attribute
   // anywhere in the cloned document (e.g. the `accent="oklch(...)"` values
@@ -1007,9 +1117,9 @@ const sanitizeUnsupportedColorsForHtml2Canvas = (clonedDoc) => {
     for (let i = style.length - 1; i >= 0; i--) {
       const prop = style[i];
       const value = style.getPropertyValue(prop);
-      if (value && UNSUPPORTED_COLOR_FN.test(value)) {
-        const rgb = toRgbColor(value);
-        if (rgb) style.setProperty(prop, rgb, style.getPropertyPriority(prop));
+      if (value && UNSUPPORTED_COLOR_FN_TEST.test(value)) {
+        const rewritten = rewriteUnsupportedColorsInText(value, varOverrides);
+        style.setProperty(prop, rewritten, style.getPropertyPriority(prop));
       }
     }
   });
