@@ -13,7 +13,7 @@ router.post(
   "/:invoiceId/pdf",
   authmiddleware.isloggedin,
   authmiddleware.isdesk,
-  express.raw({ type: "application/pdf", limit: "15mb" }),
+  express.raw({ type: "application/pdf", limit: "20mb" }),
   invoiceController.uploadInvoicePdf
 );
 // No auth — TrdAI's servers fetch this URL directly to attach the PDF to
