@@ -19,6 +19,7 @@ app.use(
   cors({ 
     // "http://localhost:5173"
     origin: [
+      "http://localhost:5173",
       "https://crazy-kids-git-main-bhavesh-mulchandanis-projects.vercel.app",
       "https://crazy-kids-psi.vercel.app",
       "https://pos.sosiyo.com"

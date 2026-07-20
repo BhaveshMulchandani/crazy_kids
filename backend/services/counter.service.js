@@ -29,10 +29,30 @@ const ensureSeeded = async (name, model, field, prefix) => {
 
   const [result] = await model.aggregate([
     { $match: { [field]: { $regex: `^${prefix}\\d+$` } } },
-    { $project: { seq: { $toInt: { $arrayElemAt: [{ $split: [`$${field}`, prefix] }, 1] } } } },
+    // onError:null (instead of bare $toInt) — legacy documents numbered by
+    // the old Date.now() generator (e.g. "INV-1783791615042") overflow a
+    // 32-bit $toInt and would crash the whole aggregation, taking checkout
+    // down with it.
+    {
+      $project: {
+        seq: {
+          $convert: {
+            input: { $arrayElemAt: [{ $split: [`$${field}`, prefix] }, 1] },
+            to: "long",
+            onError: null,
+            onNull: null,
+          },
+        },
+      },
+    },
+    // Timestamp-style numbers are not part of the sequence — seeding from
+    // one would continue numbering at 13 digits forever. Anything at or
+    // above 10^9 can only be a legacy timestamp, never a real sequence
+    // value, so skip those (and unparseable values) when picking the seed.
+    { $match: { seq: { $ne: null, $lt: 1000000000 } } },
     { $group: { _id: null, maxSeq: { $max: "$seq" } } },
   ]);
-  const seed = result?.maxSeq || 0;
+  const seed = Number(result?.maxSeq || 0);
 
   try {
     await Counter.create({ _id: name, seq: seed });

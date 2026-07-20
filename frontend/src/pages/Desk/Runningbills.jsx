@@ -466,7 +466,10 @@ const BillCard = ({
     kots: kotsBySession?.[bill._id] || [],
   });
   const socksCharge = calculateSocksCharge(bill, pricingSettings);
-  const total = sessionCharge.total + foodCharge.total + socksCharge.socksTotal;
+  // Membership plan bought with this visit — billed once, on this session's
+  // invoice only (backend mirrors this via session.membershipPurchase).
+  const membershipPurchaseTotal = Number(bill?.membershipPurchase?.price || 0);
+  const total = sessionCharge.total + foodCharge.total + socksCharge.socksTotal + membershipPurchaseTotal;
   // Must be the combined grand total (session + cafe + socks), not just
   // sessionCharge — otherwise a membership session (sessionCharge.total is
   // always 0, membership covers it) shows ₹0 pending even when there's a
@@ -632,6 +635,12 @@ const BillCard = ({
         {sessionCharge.membershipApplied && (
           <Row k="Membership" v="Applied" />
         )}
+        {membershipPurchaseTotal > 0 && (
+          <Row
+            k={`Membership Purchase — ${bill.membershipPurchase?.planName || ""}`}
+            v={formatCurrency(membershipPurchaseTotal)}
+          />
+        )}
         {!sessionCharge.membershipApplied && sessionCharge.offer && (
           <Row
             k={`Offer Applied — ${sessionCharge.offer.name} (${offerTypeLabel(sessionCharge.offer.type)})`}
@@ -754,7 +763,8 @@ const CheckoutDialog = ({
     kots: kotsBySession?.[bill?._id] || [],
   });
   const socksCharge = calculateSocksCharge(bill, pricingSettings);
-  const preDiscountTotal = sessionCharge.total + foodCharge.total + socksCharge.socksTotal;
+  const membershipPurchaseTotal = Number(bill?.membershipPurchase?.price || 0);
+  const preDiscountTotal = sessionCharge.total + foodCharge.total + socksCharge.socksTotal + membershipPurchaseTotal;
   // Operator-entered discount on top of any offer/membership pricing —
   // capped so it can never push the payable amount below zero.
   const extraDiscountAmount = Math.min(Math.max(Number(extraDiscount) || 0, 0), preDiscountTotal);
@@ -835,6 +845,12 @@ const CheckoutDialog = ({
           </div>
 
           <div className="rounded-xl border border-border/60 bg-secondary/30 p-4 mt-3 space-y-0.5">
+            {membershipPurchaseTotal > 0 && (
+              <Row
+                k={`Membership Purchase — ${bill.membershipPurchase?.planName || ""}`}
+                v={formatCurrency(membershipPurchaseTotal)}
+              />
+            )}
             <Row k="Cafe items" v={formatCurrency(foodCharge.total)} />
             {socksCharge.socksQty > 0 && (
               <Row
@@ -904,12 +920,23 @@ const INVOICE_MUTED = "#6b7280";
 const INVOICE_BORDER = "#e5e7eb";
 const INVOICE_ACCENT = "#0f172a";
 
+// Company details shown on every invoice.
+const COMPANY = {
+  name: "CRAZY KIDS",
+  phone: "+91 6354040807",
+  addressLines: [
+    "The Gateway, Shop No-201-205,",
+    "Opposite Shopper's Gate, Chala,",
+    "Vapi - Daman Road - 396191",
+  ],
+};
+
 const invoiceRowStyle = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "baseline",
-  padding: "4px 0",
-  fontSize: 12.5,
+  padding: "2.5px 0",
+  fontSize: 11.5,
   color: INVOICE_TEXT,
 };
 
@@ -928,9 +955,9 @@ const InvoiceRow = ({ label, value, bold, muted, color }) => (
 );
 
 const invoiceThStyle = {
-  padding: "7px 8px",
+  padding: "5px 7px",
   textAlign: "left",
-  fontSize: 10.5,
+  fontSize: 10,
   letterSpacing: 0.4,
   textTransform: "uppercase",
   color: "#475569",
@@ -939,8 +966,8 @@ const invoiceThStyle = {
 };
 
 const invoiceTdStyle = {
-  padding: "7px 8px",
-  fontSize: 12,
+  padding: "5px 7px",
+  fontSize: 11.5,
   color: INVOICE_TEXT,
   borderBottom: `1px solid ${INVOICE_BORDER}`,
 };
@@ -973,21 +1000,19 @@ const generateInvoicePdfBlob = async () => {
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const imgWidth = pageWidth;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-  let heightLeft = imgHeight;
-  let position = 0;
+  // Always a single page: fit the invoice inside the printable area (page
+  // minus margins), scaling down if the content is taller than one page.
+  // Centered horizontally so nothing ever touches the page borders.
+  const margin = 36; // 0.5in
+  const maxWidth = pageWidth - margin * 2;
+  const maxHeight = pageHeight - margin * 2;
+  const scale = Math.min(maxWidth / canvas.width, maxHeight / canvas.height);
+  const imgWidth = canvas.width * scale;
+  const imgHeight = canvas.height * scale;
+  const x = (pageWidth - imgWidth) / 2;
 
-  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-  heightLeft -= pageHeight;
-
-  while (heightLeft > 0) {
-    position = heightLeft - imgHeight;
-    pdf.addPage();
-    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-  }
+  pdf.addImage(imgData, "PNG", x, margin, imgWidth, imgHeight);
 
   return pdf.output("blob");
 };
@@ -1002,16 +1027,20 @@ const InvoiceDialog = ({ invoice, onClose }) => {
     if (!w) return;
     const html = document.getElementById("invoice-print")?.innerHTML ?? "";
     w.document.write(`<html><head><title>Invoice ${invoice.invoice_no}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+      <link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <style>
       *{box-sizing:border-box}
-      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:32px;color:#111827;max-width:680px;margin:auto;line-height:1.4}
+      @page{size:A4;margin:14mm}
+      body{font-family:'Mulish',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;color:#111827;max-width:680px;margin:auto;line-height:1.35}
       h1{margin:0}
-      table{width:100%;border-collapse:collapse;margin:14px 0}
-      @media print { body{padding:0} }
+      table{width:100%;border-collapse:collapse;margin:10px 0}
+      @media print { body{padding:0;max-width:100%} }
       </style></head><body>${html}</body></html>`);
     w.document.close();
     w.focus();
-    setTimeout(() => w.print(), 250);
+    setTimeout(() => w.print(), 350);
   };
 
   // Prevents duplicate sends: bails immediately if a request is already in
@@ -1108,21 +1137,27 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               display: "flex",
               justifyContent: "space-between",
               alignItems: "flex-start",
-              paddingBottom: 14,
+              paddingBottom: 10,
               borderBottom: `2px solid ${INVOICE_ACCENT}`,
             }}
           >
             <div>
-              <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, margin: 0, color: INVOICE_ACCENT }}>
-                PLAYKIT
+              <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: 0.5, margin: 0, color: INVOICE_ACCENT }}>
+                {COMPANY.name}
               </h1>
-              <div style={{ fontSize: 10.5, letterSpacing: 1, textTransform: "uppercase", color: INVOICE_MUTED, marginTop: 2 }}>
+              <div style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: INVOICE_MUTED, marginTop: 2 }}>
                 Tax Invoice
+              </div>
+              <div style={{ fontSize: 10, color: INVOICE_MUTED, marginTop: 5, lineHeight: 1.45 }}>
+                {COMPANY.addressLines.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+                <div>Phone: {COMPANY.phone}</div>
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontWeight: 700, fontSize: 13.5, fontFamily: "monospace" }}>{invoice.invoice_no}</div>
-              <div style={{ fontSize: 11, color: INVOICE_MUTED, marginTop: 2 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "monospace" }}>{invoice.invoice_no}</div>
+              <div style={{ fontSize: 10.5, color: INVOICE_MUTED, marginTop: 2 }}>
                 {invoice.closed_at ? new Date(invoice.closed_at).toLocaleString() : ""}
               </div>
             </div>
@@ -1130,12 +1165,12 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
           <div
             style={{
-              marginTop: 14,
+              marginTop: 10,
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
-              rowGap: 6,
+              rowGap: 4,
               columnGap: 16,
-              fontSize: 12.5,
+              fontSize: 11.5,
             }}
           >
             <div><span style={{ color: INVOICE_MUTED }}>Parent</span><br />{customer.parentName || invoice.parentName} · {customer.mobileNumber || invoice.mobileNumber}</div>
@@ -1171,7 +1206,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             </tbody>
           </table>
 
-          <div style={{ fontSize: 12, color: INVOICE_MUTED, marginTop: -4, marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: INVOICE_MUTED, marginTop: -4, marginBottom: 6 }}>
             <div>
               <span style={{ color: INVOICE_TEXT, fontWeight: 600 }}>Session:</span>{" "}
               {start?.toLocaleString()} → {end?.toLocaleString()} ({durMin} min billed)
@@ -1269,7 +1304,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               <InvoiceRow label="Membership Purchase" value={formatCurrency(charges.membershipPurchaseTotal)} />
             )}
 
-            <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 8, paddingTop: 6 }}>
+            <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 6, paddingTop: 4 }}>
               <InvoiceRow label="Cafe Subtotal" value={formatCurrency(charges?.cafeSubtotal ?? charges?.cafeTotal ?? 0)} />
               <InvoiceRow label="Cafe GST (5%)" value={formatCurrency(charges?.cafeGST || 0)} muted />
               <InvoiceRow label="Cafe Total" value={formatCurrency(charges?.cafeTotal || 0)} />
@@ -1282,42 +1317,42 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             </div>
 
             {charges?.extraDiscountAmount > 0 && (
-              <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 8, paddingTop: 6 }}>
+              <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 6, paddingTop: 4 }}>
                 <InvoiceRow label="Extra Discount" value={`-${formatCurrency(charges.extraDiscountAmount)}`} color="#059669" bold />
               </div>
             )}
 
-            <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 8, paddingTop: 6 }}>
+            <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 6, paddingTop: 4 }}>
               <InvoiceRow label="Loyalty Points Earned" value={loyaltyPoints} />
             </div>
 
             <div
               style={{
-                marginTop: 12,
-                paddingTop: 10,
+                marginTop: 8,
+                paddingTop: 8,
                 borderTop: `2px solid ${INVOICE_ACCENT}`,
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
               }}
             >
-              <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: INVOICE_ACCENT }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: INVOICE_ACCENT }}>
                 Grand Total
               </span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: INVOICE_ACCENT }}>{formatCurrency(charges?.grandTotal || 0)}</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: INVOICE_ACCENT }}>{formatCurrency(charges?.grandTotal || 0)}</span>
             </div>
           </div>
 
           <div
             style={{
               textAlign: "center",
-              marginTop: 18,
-              fontSize: 11.5,
+              marginTop: 12,
+              fontSize: 11,
               fontStyle: "italic",
               color: INVOICE_MUTED,
             }}
           >
-            Thank you for visiting!
+            Thank you for visiting Crazy Kids! · {COMPANY.phone}
           </div>
         </div>
         <DialogFooter>
@@ -1534,11 +1569,25 @@ function SessionsPage() {
 
   const openInvoice = async (session) => {
     try {
-      const invoiceResponse = await axios.get(
-        `${import.meta.env.VITE_API_URL}/invoice/session/${session._id}`,
-        { withCredentials: true },
-      );
-      const invoice = invoiceResponse.data?.invoice;
+      let invoice = null;
+      try {
+        const invoiceResponse = await axios.get(
+          `${import.meta.env.VITE_API_URL}/invoice/session/${session._id}`,
+          { withCredentials: true },
+        );
+        invoice = invoiceResponse.data?.invoice;
+      } catch (error) {
+        // A session can end up completed with no invoice if invoice
+        // generation crashed mid-checkout — recover by asking the backend
+        // to (idempotently) create it now instead of dead-ending.
+        if (error.response?.status !== 404) throw error;
+        const createResponse = await axios.post(
+          `${import.meta.env.VITE_API_URL}/invoice/create/${session._id}`,
+          {},
+          { withCredentials: true },
+        );
+        invoice = createResponse.data?.invoice;
+      }
       if (!invoice) {
         toast.error("Invoice not found");
         return;

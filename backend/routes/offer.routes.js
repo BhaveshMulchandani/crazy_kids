@@ -11,6 +11,8 @@ router.get("/active", authmiddleware.isloggedin, offercontroller.getactiveoffers
 
 router.patch("/:id/toggle", authmiddleware.isloggedin, authmiddleware.isadmin, offercontroller.toggleoffer);
 
+router.put("/:id", authmiddleware.isloggedin, authmiddleware.isadmin, offercontroller.updateoffer);
+
 router.delete("/:id", authmiddleware.isloggedin, authmiddleware.isadmin, offercontroller.deleteoffer);
 
 module.exports = router

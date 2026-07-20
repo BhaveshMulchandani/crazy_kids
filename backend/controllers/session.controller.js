@@ -86,6 +86,13 @@ const createsession = async (
       });
     }
 
+    if (!/^\d{10}$/.test(mobileNumber.trim())) {
+      return res.status(400).json({
+        message:
+          "Mobile number must be exactly 10 digits",
+      });
+    }
+
     if (!area?.trim()) {
       return res.status(400).json({
         message:

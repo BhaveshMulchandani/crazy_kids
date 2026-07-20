@@ -321,8 +321,8 @@ function BillingPage() {
 
     if (!mobile.trim()) {
       nextErrors.mobile = "Mobile number is required";
-    } else if (mobile.trim().length < 10) {
-      nextErrors.mobile = "Mobile number must be at least 10 digits";
+    } else if (!/^\d{10}$/.test(mobile.trim())) {
+      nextErrors.mobile = "Mobile number must be exactly 10 digits";
     }
 
     if (!area.trim()) {
@@ -553,7 +553,7 @@ function BillingPage() {
           </div>
           <Button
             onClick={findCustomer}
-            className="h-11 px-6"
+            className="h-11 px-6 text-white"
             style={{ background: "var(--primary)" }}
           >
             <Search className="h-4 w-4 mr-2" /> Find
@@ -606,9 +606,12 @@ function BillingPage() {
             <div className="space-y-2">
               <Label>Mobile *</Label>
               <Input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
                 value={mobile}
                 onChange={(e) => {
-                  setMobile(e.target.value.replace(/\D/g, "").slice(0,11));
+                  setMobile(e.target.value.replace(/\D/g, "").slice(0, 10));
                   setErrors((prev) => ({ ...prev, mobile: "" }));
                 }}
                 className={errors.mobile ? "border-red-500" : ""}
@@ -918,7 +921,7 @@ function BillingPage() {
             <Button
               onClick={submit}
               disabled={submitting}
-              className="h-11 px-8"
+              className="h-11 px-8 text-white"
               style={{ background: "var(--primary)" }}
             >
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

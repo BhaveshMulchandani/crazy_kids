@@ -15,6 +15,7 @@ import {
   Check,
 } from "lucide-react";
 import { toast } from "sonner";
+import ConfirmDialog from "../../components/ConfirmDialog";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -475,6 +476,8 @@ function Cafemenu() {
   const [editing, setEditing] = useState(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchMenus = useCallback(async () => {
     setLoading(true);
@@ -556,19 +559,26 @@ function Cafemenu() {
     }
   };
 
-  const removeItem = async (_id) => {
+  const confirmRemoveItem = async () => {
+    if (!deleteTarget) return;
+
+    setDeleting(true);
     try {
-      await axios.delete(`${import.meta.env.VITE_API_URL}/menu/delete/${_id}`, {
-        withCredentials: true,
-      });
+      await axios.delete(
+        `${import.meta.env.VITE_API_URL}/menu/delete/${deleteTarget._id}`,
+        { withCredentials: true },
+      );
       await fetchMenus();
       toast.success("Item removed");
+      setDeleteTarget(null);
     } catch (error) {
       console.error(error);
       toast.error(
         error?.response?.data?.message ||
           "Unable to remove menu item. Please try again.",
       );
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -615,6 +625,7 @@ function Cafemenu() {
         <Button
           onClick={newItem}
           style={{ background: "var(--primary)" }}
+          className="text-white"
         >
           <Plus className="h-4 w-4 mr-2" /> Add item
         </Button>
@@ -689,7 +700,7 @@ function Cafemenu() {
                           size="sm"
                           variant="ghost"
                           disabled={!item.available}
-                          onClick={() => removeItem(item._id)}
+                          onClick={() => setDeleteTarget(item)}
                         >
                           <Trash2 className="h-3 w-3 text-destructive" />
                         </Button>
@@ -710,6 +721,20 @@ function Cafemenu() {
         item={editing}
         onSaved={saveItem}
         setEditing={setEditing}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete this menu item?"
+        message={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be removed from the cafe menu. Existing orders are not affected.`
+            : ""
+        }
+        confirmLabel="Delete"
+        loading={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={confirmRemoveItem}
       />
     </div>
   );

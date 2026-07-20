@@ -1,6 +1,8 @@
 import * as React from "react";
 import axios from "axios";
-import { BadgeIndianRupee, Gift, Percent, Plus, Trash2, Wallet } from "lucide-react";
+import { toast } from "sonner";
+import { BadgeIndianRupee, Gift, Pencil, Percent, Plus, Trash2, Wallet } from "lucide-react";
+import ConfirmDialog from "../../components/ConfirmDialog";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -456,13 +458,16 @@ const SpecialPricingFields = ({ rules, setRules, typeSelect }) => (
 function Offers() {
   const [offers, setOffers] = React.useState([]);
   const [open, setOpen] = React.useState(false);
+  const [editingOffer, setEditingOffer] = React.useState(null);
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [type, setType] = React.useState("membership");
   const [value, setValue] = React.useState(4500);
   const [rules, setRules] = React.useState(defaultRulesByType.membership);
-  const [message, setMessage] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState(null);
+  const [deleting, setDeleting] = React.useState(false);
 
   const normalizeOffer = (offer) => ({
     ...offer,
@@ -494,7 +499,7 @@ function Offers() {
         : [];
       setOffers(serverOffers);
     } catch (error) {
-      setMessage(error?.response?.data?.message || "Unable to load offers.");
+      toast.error(error?.response?.data?.message || "Unable to load offers.");
     } finally {
       setLoading(false);
     }
@@ -504,39 +509,107 @@ function Offers() {
     Promise.resolve().then(fetchOffers);
   }, [fetchOffers]);
 
-  const createOffer = async () => {
-    if (!name.trim() || (type !== "special_pricing" && value <= 0) || !type) {
-      setMessage("Please provide an offer name, type, and valid values.");
+  const resetForm = () => {
+    setEditingOffer(null);
+    setName("");
+    setDescription("");
+    setType("membership");
+    setValue(4500);
+    setRules(defaultRulesByType.membership);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setOpen(true);
+  };
+
+  const openEdit = (offer) => {
+    setEditingOffer(offer);
+    setName(offer.name || "");
+    setDescription(offer.description || "");
+    setType(offer.type);
+    setValue(Number(offer.value) || 0);
+    // Deep-copy rules so edits don't mutate the offer object shown in the card.
+    setRules({
+      ...defaultRulesByType[offer.type],
+      ...(offer.rules || {}),
+      ...(offer.type === "membership"
+        ? { benefits: [...(offer.rules?.benefits || [])] }
+        : {}),
+    });
+    setOpen(true);
+  };
+
+  // Mirrors offer.controller.js:validateOfferPayload — returns an error
+  // message string, or null when the form is valid.
+  const validateOfferForm = () => {
+    if (!name.trim()) return "Offer name is required.";
+    if (type === "membership") {
+      if (!(Number(value) > 0)) return "Membership price must be greater than 0.";
+      if (!(Number(rules.kidsAllowed) > 0)) return "Kids allowed must be at least 1.";
+      if (!(Number(rules.playHours) > 0)) return "Play hours must be greater than 0.";
+      if (!(Number(rules.validityMonths) > 0)) return "Validity must be at least 1 month.";
+    } else if (type === "discount") {
+      if (!(Number(value) > 0) || Number(value) > 100) return "Discount percentage must be between 1 and 100.";
+      if (!(Number(rules.minKids) > 0)) return "Minimum kids must be at least 1.";
+    } else if (type === "flat_discount") {
+      if (!(Number(value) > 0)) return "Discount amount must be greater than 0.";
+      if (!(Number(rules.minKids) > 0)) return "Minimum kids must be at least 1.";
+    } else if (type === "special_pricing") {
+      if (!String(rules.day || "").trim()) return "Applicable day is required.";
+      if (!(Number(rules.firstHourPrice) > 0)) return "First hour price must be greater than 0.";
+      if (!(Number(rules.nextHourPrice) > 0)) return "Additional hour price must be greater than 0.";
+    }
+    return null;
+  };
+
+  const saveOffer = async () => {
+    const validationError = validateOfferForm();
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
 
-    try {
-      const response = await axios.post(
-        `${API_BASE}/offers/createoffer`,
-        {
-          name: name.trim(),
-          description: description.trim(),
-          type,
-          value: type === "special_pricing" ? 0 : Number(value),
-          rules,
-          active: true,
-        },
-        {
-          withCredentials: true,
-        },
-      );
+    const payload = {
+      name: name.trim(),
+      description: description.trim(),
+      type,
+      value: type === "special_pricing" ? 0 : Number(value),
+      rules,
+    };
 
-      const nextOffer = normalizeOffer(response.data.offer);
-      setOffers((current) => [nextOffer, ...current]);
+    setSaving(true);
+    try {
+      if (editingOffer) {
+        const response = await axios.put(
+          `${API_BASE}/offers/${editingOffer.id}`,
+          payload,
+          { withCredentials: true },
+        );
+        const updated = normalizeOffer(response.data.offer);
+        setOffers((current) =>
+          current.map((offer) => (offer.id === updated.id ? updated : offer)),
+        );
+        toast.success("Offer updated successfully.");
+      } else {
+        const response = await axios.post(
+          `${API_BASE}/offers/createoffer`,
+          { ...payload, active: true },
+          { withCredentials: true },
+        );
+        const nextOffer = normalizeOffer(response.data.offer);
+        setOffers((current) => [nextOffer, ...current]);
+        toast.success("Offer created successfully.");
+      }
       setOpen(false);
-      setName("");
-      setDescription("");
-      setType("membership");
-      setValue(4500);
-      setRules(defaultRulesByType.membership);
-      setMessage("Offer created successfully.");
+      resetForm();
     } catch (error) {
-      setMessage(error?.response?.data?.message || "Unable to create offer.");
+      toast.error(
+        error?.response?.data?.message ||
+          (editingOffer ? "Unable to update offer." : "Unable to create offer."),
+      );
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -554,21 +627,25 @@ function Offers() {
         current.map((offer) => (offer.id === updated.id ? updated : offer)),
       );
     } catch (error) {
-      setMessage(error?.response?.data?.message || "Unable to update offer status.");
+      toast.error(error?.response?.data?.message || "Unable to update offer status.");
     }
   };
 
-  const removeOffer = async (id) => {
-    if (!window.confirm("Delete this offer?")) return;
+  const confirmRemoveOffer = async () => {
+    if (!deleteTarget) return;
 
+    setDeleting(true);
     try {
-      await axios.delete(`${API_BASE}/offers/${id}`, {
+      await axios.delete(`${API_BASE}/offers/${deleteTarget.id}`, {
         withCredentials: true,
       });
-      setOffers((current) => current.filter((offer) => offer.id !== id));
-      setMessage("Offer removed.");
+      setOffers((current) => current.filter((offer) => offer.id !== deleteTarget.id));
+      toast.success("Offer deleted.");
+      setDeleteTarget(null);
     } catch (error) {
-      setMessage(error?.response?.data?.message || "Unable to delete offer.");
+      toast.error(error?.response?.data?.message || "Unable to delete offer.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -598,14 +675,13 @@ function Offers() {
           <p className="text-muted-foreground mt-1">Create and manage Crazy Kids membership, discount, and special pricing offers.</p>
         </div>
         <div className="flex items-center gap-3 text-white">
-          <Button className="h-11 px-6 bg-blue-600" onClick={() => setOpen(true)}>
+          <Button className="h-11 px-6 bg-blue-600" onClick={openCreate}>
             <Plus className="h-4 w-4" />
             New offer
           </Button>
         </div>
       </div>
 
-      {message && <div className="rounded-xl border border-input bg-muted/50 px-4 py-3 text-sm text-muted-foreground">{message}</div>}
       {loading && <div className="rounded-xl border border-input bg-muted/50 px-4 py-3 text-sm text-muted-foreground">Loading offers...</div>}
 
       <div className="grid gap-5 md:grid-cols-3">
@@ -688,14 +764,25 @@ function Offers() {
                   <span className={cn("h-1.5 w-1.5 rounded-full", offer.active ? "bg-emerald-500" : "bg-muted-foreground/60")} />
                   {offer.active ? "Active" : "Inactive"}
                 </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40"
-                  onClick={() => removeOffer(offer.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title="Edit offer"
+                    onClick={() => openEdit(offer)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title="Delete offer"
+                    className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40"
+                    onClick={() => setDeleteTarget(offer)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </div>
           );
@@ -705,7 +792,7 @@ function Offers() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent open={open} onOpenChange={setOpen} className="bg-white">
           <DialogHeader>
-            <DialogTitle>Add new offer</DialogTitle>
+            <DialogTitle>{editingOffer ? "Edit offer" : "Add new offer"}</DialogTitle>
           </DialogHeader>
 
           <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
@@ -734,13 +821,35 @@ function Offers() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+                resetForm();
+              }}
+            >
               Cancel
             </Button>
-            <Button onClick={createOffer} className="bg-blue-600 text-white">Create</Button>
+            <Button onClick={saveOffer} disabled={saving} className="bg-blue-600 text-white">
+              {editingOffer ? "Save changes" : "Create"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete this offer?"
+        message={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be permanently removed. Sessions that already used it are not affected.`
+            : ""
+        }
+        confirmLabel="Delete"
+        loading={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={confirmRemoveOffer}
+      />
     </div>
   );
 }
