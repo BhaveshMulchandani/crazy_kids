@@ -52,7 +52,7 @@ const Label = React.forwardRef(({ className, ...props }, ref) => (
 Label.displayName = "Label";
 
 const Field = ({ label, value, onChange }) => (
-  <div>
+  <div className="min-w-0">
     <Label>{label}</Label>
     <Input className="mt-2" type="number" value={value} onChange={(e) => onChange(e.target.value)} />
   </div>
@@ -122,9 +122,9 @@ function Settings() {
   };
 
   return (
-    <div className="space-y-6 px-6 py-8">
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
       <div>
-        <h1 className="text-3xl font-semibold flex items-center gap-2"><SettingsIcon className="h-7 w-7 text-primary" /> Settings</h1>
+        <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold flex items-center gap-2"><SettingsIcon className="h-7 w-7 text-primary" /> Settings</h1>
         <p className="text-muted-foreground mt-1">Session pricing, socks cost and loyalty rate.</p>
       </div>
 
@@ -134,19 +134,19 @@ function Settings() {
           <h2 className="font-semibold">Session pricing (per child, per age tier)</h2>
         </div>
 
-        <div className="grid grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <Field label="First hour — under 3 years (₹)" value={form.firstHourUnder3} onChange={(v) => set("firstHourUnder3", v)} />
           <Field label="First hour — 3 years and above (₹)" value={form.firstHourAbove3} onChange={(v) => set("firstHourAbove3", v)} />
           <Field label="Extension per hour — under 3 years (₹)" value={form.extensionUnder3} onChange={(v) => set("extensionUnder3", v)} />
           <Field label="Extension per hour — 3 years and above (₹)" value={form.extensionAbove3} onChange={(v) => set("extensionAbove3", v)} />
         </div>
 
-        <div className="grid grid-cols-2 gap-5 pt-4 border-t border-input">
-          <div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-4 border-t border-input">
+          <div className="min-w-0">
             <Label className="flex items-center gap-1.5"><Coffee className="h-3.5 w-3.5" /> Socks cost (₹)</Label>
             <Input className="mt-2" type="number" value={form.socksCost} onChange={(e) => set("socksCost", e.target.value)} />
           </div>
-          <div>
+          <div className="min-w-0">
             <Label className="flex items-center gap-1.5"><Award className="h-3.5 w-3.5" /> Loyalty points per ₹100</Label>
             <Input className="mt-2" type="number" value={form.loyaltyPointsPer100} onChange={(e) => set("loyaltyPointsPer100", e.target.value)} />
           </div>

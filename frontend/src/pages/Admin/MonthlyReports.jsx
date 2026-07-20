@@ -118,9 +118,9 @@ function MonthlyReports() {
   };
 
   return (
-    <div className="space-y-6 px-6 py-8">
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
       <div>
-        <h1 className="text-3xl font-semibold">Monthly Reports</h1>
+        <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold">Monthly Reports</h1>
         <p className="text-muted-foreground mt-1">
           Generate a monthly customer activity report and download it as a PDF.
         </p>
@@ -158,7 +158,7 @@ function MonthlyReports() {
             </Select>
           </div>
 
-          <div className="flex items-center gap-3 text-white">
+          <div className="flex flex-wrap items-center gap-3 text-white">
             <Button className="h-10 px-5 bg-blue-600" onClick={generateReport} disabled={generating}>
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileBarChart className="h-4 w-4" />}
               {generating ? "Generating..." : "Generate Report"}
@@ -185,7 +185,7 @@ function MonthlyReports() {
 
       {report && (
         <>
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 lg:gap-5">
             <SummaryCard label="Customers Visited" value={report.summary.totalCustomers} />
             <SummaryCard label="Total Visits" value={report.summary.totalVisits} />
             <SummaryCard label="Total Revenue" value={`₹${Number(report.summary.totalRevenue).toLocaleString()}`} />
@@ -193,6 +193,7 @@ function MonthlyReports() {
           </div>
 
           <div className="surface-card overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-secondary/60 text-muted-foreground">
                 <tr>
@@ -239,6 +240,7 @@ function MonthlyReports() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

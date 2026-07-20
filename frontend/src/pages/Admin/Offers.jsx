@@ -189,7 +189,7 @@ const Dialog = ({ children }) => <div>{children}</div>;
 const DialogContent = React.forwardRef(({ open, onOpenChange, className, children, ...props }, ref) => {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
       <div className="fixed inset-0 bg-black/50" onClick={() => onOpenChange?.(false)} />
       <div
         ref={ref}
@@ -333,7 +333,7 @@ const MembershipFields = ({ value, rules, setValue, setRules, typeSelect }) => (
         {(rules.benefits || []).map((benefit, index) => (
           <div key={index} className="flex items-center gap-2">
             <Input
-              className="h-9"
+              className="h-9 min-w-0"
               value={benefit}
               onChange={(event) => {
                 const nextBenefits = [...rules.benefits];
@@ -668,13 +668,13 @@ function Offers() {
   );
 
   return (
-    <div className="space-y-6 px-6 py-8">
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">Offers</h1>
+        <div className="min-w-0">
+          <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold">Offers</h1>
           <p className="text-muted-foreground mt-1">Create and manage Crazy Kids membership, discount, and special pricing offers.</p>
         </div>
-        <div className="flex items-center gap-3 text-white">
+        <div className="flex flex-wrap items-center gap-3 text-white">
           <Button className="h-11 px-6 bg-blue-600" onClick={openCreate}>
             <Plus className="h-4 w-4" />
             New offer
@@ -684,7 +684,7 @@ function Offers() {
 
       {loading && <div className="rounded-xl border border-input bg-muted/50 px-4 py-3 text-sm text-muted-foreground">Loading offers...</div>}
 
-      <div className="grid gap-5 md:grid-cols-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4 lg:gap-5">
         {offers.map((offer) => {
           const Icon = iconByType[offer.type] || BadgeIndianRupee;
           return (
@@ -711,10 +711,10 @@ function Offers() {
                 </div>
                 <Switch checked={offer.active} onCheckedChange={() => toggleActive(offer.id)} />
               </div>
-              <div className="mt-5">
+              <div className="mt-5 min-w-0">
                 <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{typeLabel[offer.type]}</div>
-                <div className="font-semibold text-xl mt-1.5 tracking-tight text-foreground">{offer.name}</div>
-                {offer.description && <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{offer.description}</p>}
+                <div className="font-semibold text-xl mt-1.5 tracking-tight text-foreground break-words">{offer.name}</div>
+                {offer.description && <p className="text-sm text-muted-foreground mt-2 leading-relaxed break-words">{offer.description}</p>}
                 {offer.type === "membership" && (
                   <div className="mt-5 space-y-3 text-foreground">
                     <div className="text-3xl font-semibold tracking-tight">₹{offer.value}</div>

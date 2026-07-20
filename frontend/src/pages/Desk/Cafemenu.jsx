@@ -274,7 +274,7 @@ const DialogContent = React.forwardRef(
     const ctx = useContext(DialogContext);
     if (!ctx?.open) return null;
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
         <div
           className="fixed inset-0 bg-black/70"
           onClick={() => ctx.onOpenChange?.(false)}
@@ -282,7 +282,7 @@ const DialogContent = React.forwardRef(
         <div
           ref={ref}
           className={cn(
-            "relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border bg-white p-6 shadow-2xl",
+            "relative z-10 w-full max-w-xl max-h-[85vh] overflow-y-auto rounded-2xl border bg-white p-6 shadow-2xl",
             className,
           )}
           onClick={(event) => event.stopPropagation()}
@@ -390,8 +390,8 @@ function ItemDialog({ open, setOpen, item, onSaved, setEditing }) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2 min-w-0">
               <Label>Category</Label>
               <Select
                 value={form.category ?? "drinks"}
@@ -409,7 +409,7 @@ function ItemDialog({ open, setOpen, item, onSaved, setEditing }) {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <Label>Price (₹)</Label>
               <Input
                 type="number"
@@ -611,11 +611,11 @@ function Cafemenu() {
   };
 
   return (
-    <div className="space-y-6 px-6 py-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold flex items-center gap-2">
-            <UtensilsCrossed className="h-7 w-7 text-primary" /> Cafe Menu
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold flex items-center gap-2">
+            <UtensilsCrossed className="h-7 w-7 text-primary shrink-0" /> Cafe Menu
           </h1>
           <p className="text-muted-foreground mt-1">
             Manage what the POS shows. Toggle availability or update price
@@ -649,7 +649,7 @@ function Cafemenu() {
                 <h2 className="text-sm uppercase tracking-wider text-muted-foreground mb-3">
                   {catKey}
                 </h2>
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4 lg:gap-5">
                   {list.map((item) => (
                     <div
                       key={item._id}
@@ -670,8 +670,8 @@ function Cafemenu() {
                         )}
                       </div>
                       <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="font-semibold">{item.name}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold truncate">{item.name}</div>
                           <div className="text-sm text-primary font-medium">
                             ₹{Number(item.price)}
                           </div>

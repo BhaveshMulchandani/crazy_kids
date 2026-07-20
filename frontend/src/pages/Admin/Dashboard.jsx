@@ -126,15 +126,15 @@ export default function Dashboard() {
   const recentTransactions = stats.recentTransactions || [];
 
   return (
-    <div className="space-y-8 px-6 py-8">
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
       <div>
-        <h1 className="text-3xl font-semibold">Welcome back, Admin</h1>
+        <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold">Welcome back, Admin</h1>
         <p className="text-muted-foreground mt-1">
           Live snapshot of your store. Auto-refreshing.
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-5">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 lg:gap-5">
         <StatCard
           label="Total Revenue"
           value={`₹${totalRevenue.toLocaleString()}`}
@@ -166,18 +166,18 @@ export default function Dashboard() {
       </div>
 
       {membershipAnalytics && <>
-        <div className="grid grid-cols-3 gap-5">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4 lg:gap-5">
           <StatCard label="Memberships Sold" value={membershipAnalytics.totalSold} icon={Users} accent="oklch(0.58 0.21 260)" />
           <StatCard label="Active Memberships" value={membershipAnalytics.active} hint={`${membershipAnalytics.expired} expired`} icon={Timer} accent="oklch(0.65 0.18 145)" />
           <StatCard label="Membership Revenue" value={`₹${Number(membershipAnalytics.revenue).toLocaleString()}`} icon={IndianRupee} accent="oklch(0.78 0.17 75)" />
         </div>
-        <div className="grid grid-cols-2 gap-5">
-          <div className="surface-card p-5"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p><p className="mt-1 text-sm text-muted-foreground">{membershipAnalytics.expiringSoon.length} memberships expire within 7 days.</p></div>
-          <div className="surface-card p-5"><h3 className="font-semibold">Recently purchased memberships</h3><div className="mt-2 space-y-1 text-sm">{membershipAnalytics.recent.slice(0, 3).map((item) => <div key={item._id} className="flex justify-between"><span>{item.customer?.parentName} · {item.planName}</span><span className="text-muted-foreground">{new Date(item.purchaseDate).toLocaleDateString()}</span></div>)}{membershipAnalytics.recent.length === 0 && <span className="text-muted-foreground">No memberships purchased yet.</span>}</div></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
+          <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p><p className="mt-1 text-sm text-muted-foreground">{membershipAnalytics.expiringSoon.length} memberships expire within 7 days.</p></div>
+          <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Recently purchased memberships</h3><div className="mt-2 space-y-1 text-sm">{membershipAnalytics.recent.slice(0, 3).map((item) => <div key={item._id} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5"><span className="min-w-0 truncate">{item.customer?.parentName} · {item.planName}</span><span className="text-muted-foreground shrink-0">{new Date(item.purchaseDate).toLocaleDateString()}</span></div>)}{membershipAnalytics.recent.length === 0 && <span className="text-muted-foreground">No memberships purchased yet.</span>}</div></div>
         </div>
       </>}
 
-      <div className="grid grid-cols-4 gap-5">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 lg:gap-5">
         <StatCard
           label="This Week"
           value={`₹${weekSales.toLocaleString()}`}
@@ -206,7 +206,7 @@ export default function Dashboard() {
       </div>
 
       {stats.offerAnalytics && (
-        <div className="grid grid-cols-3 gap-5">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4 lg:gap-5">
           <StatCard
             label="Most Used Offer"
             value={stats.offerAnalytics.mostUsedOffer || "—"}
@@ -236,7 +236,7 @@ export default function Dashboard() {
 
       {activeSessions.length > 0 && (
         <div className="surface-card p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h3 className="font-semibold flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
               Active sessions
@@ -245,7 +245,7 @@ export default function Dashboard() {
               {activeSessions.length} running
             </span>
           </div>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
             {activeSessions.slice(0, 8).map((s) => {
               const remaining = Math.max(
                 0,
@@ -258,7 +258,7 @@ export default function Dashboard() {
                 <div
                   key={String(s._id)}
                   className={[
-                    "rounded-xl border p-3",
+                    "rounded-xl border p-3 min-w-0",
                     exp
                       ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-500/10"
                       : "bg-secondary/40",
@@ -283,8 +283,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-5">
-        <div className="col-span-2 surface-card p-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-5">
+        <div className="xl:col-span-2 surface-card p-4 sm:p-6 min-w-0">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="font-semibold">Revenue trend</h3>
@@ -319,7 +319,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="surface-card p-6">
+        <div className="surface-card p-4 sm:p-6 min-w-0">
           <h3 className="font-semibold">Most used offers</h3>
           <p className="text-xs text-muted-foreground mb-4">Distribution</p>
           <div className="h-72">
@@ -356,8 +356,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        <div className="col-span-2 surface-card p-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-5">
+        <div className="xl:col-span-2 surface-card p-4 sm:p-6 min-w-0">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="font-semibold flex items-center gap-2">
@@ -394,7 +394,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="surface-card p-6">
+        <div className="surface-card p-4 sm:p-6 min-w-0">
           <h3 className="font-semibold mb-4">Top customers</h3>
           <div className="space-y-2">
             {topCustomers.length === 0 && (

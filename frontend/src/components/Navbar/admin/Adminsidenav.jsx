@@ -38,7 +38,7 @@ export default function Adminsidenav() {
   const user = JSON.parse(localStorage.getItem("user"));
 
   return (
-    <aside className="w-64 min-h-screen bg-slate-950 text-white flex flex-col">
+    <aside className="w-56 xl:w-64 shrink-0 min-h-screen bg-slate-950 text-white flex flex-col overflow-y-auto">
       {/* Logo */}
       <div className="px-6 py-6 flex items-center gap-3 border-b border-white/10">
         <div className="grid h-10 w-10 place-items-center rounded-xl bg-white/10">

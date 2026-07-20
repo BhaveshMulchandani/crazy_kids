@@ -505,7 +505,7 @@ function BillingPage() {
   );
 
   return (
-    <div className="space-y-6 px-6 py-8">
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 px-6 py-8">
       <div>
         <h1 className="text-3xl font-semibold">Start New Session</h1>
         <p className="text-muted-foreground mt-1">
@@ -517,8 +517,8 @@ function BillingPage() {
         <Label className="text-xs uppercase tracking-wide text-muted-foreground">
           Returning customer? Find them
         </Label>
-        <div className="mt-2 flex gap-3">
-          <div className="relative flex-1">
+        <div className="mt-2 flex flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[220px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               className="pl-9 h-11"
@@ -589,8 +589,8 @@ function BillingPage() {
 
       <div className="gap-6">
         <div className="col-span-2 surface-card p-8 space-y-6">
-          <div className="grid grid-cols-3 gap-5">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="space-y-2 min-w-0">
               <Label>Parent Name *</Label>
               <Input
                 value={parentName}
@@ -603,7 +603,7 @@ function BillingPage() {
               />
               {errors.parentName && <p className="text-xs text-red-500">{errors.parentName}</p>}
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <Label>Mobile *</Label>
               <Input
                 type="tel"
@@ -619,7 +619,7 @@ function BillingPage() {
               />
               {errors.mobile && <p className="text-xs text-red-500">{errors.mobile}</p>}
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <Label>Band Number (optional)</Label>
               <Input
                 value={bandNumber}
@@ -629,8 +629,8 @@ function BillingPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-5">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div className="space-y-2 min-w-0">
               <Label>Area *</Label>
               <Input
                 name="area"
@@ -645,7 +645,7 @@ function BillingPage() {
               />
               {errors.area && <p className="text-xs text-red-500">{errors.area}</p>}
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <Label>City *</Label>
               <Input
                 name="city"
@@ -671,7 +671,7 @@ function BillingPage() {
                 <Plus className="h-3.5 w-3.5 mr-1" /> Add child
               </Button>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               {children.map((c, i) => {
                 const age = c.dob ? ageInYears(c.dob) : null;
                 const childNameError = errors[`child-${i}-name`];
@@ -762,8 +762,8 @@ function BillingPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-5">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div className="space-y-2 min-w-0">
               <Label>Offer{membership ? " (unavailable — active membership applies)" : ""}</Label>
               <select
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -783,7 +783,7 @@ function BillingPage() {
                   ))}
               </select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <Label>Purchase membership (optional)</Label>
               <select className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm" value={membershipPlanId} disabled={!!membership} onChange={(e) => setMembershipPlanId(e.target.value)}>
                 <option value="none">{membership ? "Customer already has an active membership" : "No membership"}</option>
@@ -792,13 +792,13 @@ function BillingPage() {
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 min-w-0">
             <Label>Reference</Label>
             <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Booking reference" />
           </div>
 
-          <div className="grid grid-cols-2 gap-5">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div className="space-y-2 min-w-0">
               <Label>Payment status</Label>
               <select
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -810,7 +810,7 @@ function BillingPage() {
                 <option value="partially_paid">Partially paid</option>
               </select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <Label>Notes (optional)</Label>
               <Input
                 value={notes}
@@ -821,8 +821,8 @@ function BillingPage() {
           </div>
 
           {paymentStatus === "paid" && (
-            <div className="grid grid-cols-2 gap-5">
-              <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div className="space-y-2 min-w-0">
                 <Label>Payment method</Label>
                 <select
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -835,7 +835,7 @@ function BillingPage() {
                   <option value="other">Other</option>
                 </select>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 min-w-0">
                 <Label>Amount paid (₹)</Label>
                 <Input
                   type="number"

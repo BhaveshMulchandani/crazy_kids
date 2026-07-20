@@ -4,9 +4,9 @@ export default function Admintopnav() {
   const user = JSON.parse(localStorage.getItem("user"));
 
   return (
-    <header className="h-16 border-b border-slate-200 bg-white px-8 flex items-center justify-between">
+    <header className="h-16 border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
       {/* Search */}
-      <div className="relative w-96">
+      <div className="relative w-full max-w-md min-w-0 flex-1">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
         <input
@@ -17,8 +17,8 @@ export default function Admintopnav() {
       </div>
 
       {/* Right Side */}
-      <div className="flex items-center gap-4">
-        <button className="grid h-10 w-10 place-items-center rounded-full border border-slate-200 transition hover:bg-slate-100">
+      <div className="flex shrink-0 items-center gap-4">
+        <button className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-slate-200 transition hover:bg-slate-100">
           <Bell className="h-4 w-4" />
         </button>
 

@@ -393,7 +393,7 @@ const DialogContent = ({ className, children, ...props }) => {
   const ctx = useContext(DialogContext);
   if (!ctx?.open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
       <div
         className="fixed inset-0 bg-black/80"
         onClick={() => ctx.onOpenChange?.(false)}
@@ -431,10 +431,10 @@ const DialogTitle = ({ className, ...props }) => (
 );
 
 const Row = ({ k, v, bold, accent }) => (
-  <div className={`flex items-baseline justify-between gap-3 py-0.5 ${bold ? "text-sm" : ""}`}>
-    <span className={bold ? "font-semibold text-foreground" : "text-muted-foreground"}>{k}</span>
+  <div className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-0.5 ${bold ? "text-sm" : ""}`}>
+    <span className={`min-w-0 break-words ${bold ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{k}</span>
     <span
-      className={`tabular-nums ${bold ? "font-bold text-base" : "font-medium"}`}
+      className={`shrink-0 tabular-nums ${bold ? "font-bold text-base" : "font-medium"}`}
       style={accent ? { color: accent } : undefined}
     >
       {v}
@@ -506,13 +506,13 @@ const BillCard = ({
           <div className="text-xs font-medium text-muted-foreground font-mono tracking-tight">
             {bill.sessionNumber}
           </div>
-          <div className="flex items-center gap-2">
-            <div className="font-bold text-base leading-tight tracking-tight">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="min-w-0 truncate font-bold text-base leading-tight tracking-tight">
               {bill.parentName}
             </div>
 
             {hasBirthday && (
-              <span className="rounded-full bg-pink-600 px-2 py-0.5 text-xs font-semibold text-white">
+              <span className="shrink-0 rounded-full bg-pink-600 px-2 py-0.5 text-xs font-semibold text-white">
                 🎂 Birthday
               </span>
             )}
@@ -522,7 +522,7 @@ const BillCard = ({
           </div>
         </div>
         <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+          className={`inline-flex shrink-0 items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
             isOverdue
               ? "bg-rose-500/15 text-rose-700 dark:text-rose-400"
               : paused
@@ -670,7 +670,7 @@ const BillCard = ({
         </div>
       </div>
 
-      <div className="mt-2.5 flex gap-2">
+      <div className="mt-2.5 flex flex-wrap gap-2">
         {bill.status === "booked" && (
           <Button
             size="sm"
@@ -810,7 +810,7 @@ const CheckoutDialog = ({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg bg-white">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto bg-white">
         <DialogHeader>
           <DialogTitle>Checkout · {bill.parentName}</DialogTitle>
         </DialogHeader>
@@ -1179,32 +1179,34 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             {customer.city && <div><span style={{ color: INVOICE_MUTED }}>City</span><br />{customer.city}</div>}
           </div>
 
-          <table>
-            <thead>
-              <tr>
-                <th style={invoiceThStyle}>Child</th>
-                <th style={invoiceThStyle}>DOB</th>
-                <th style={invoiceThStyle}>Age</th>
-                <th style={invoiceThStyle}>First Hour</th>
-                <th style={invoiceThStyle}>Extension</th>
-                <th style={invoiceThStyle}>Socks</th>
-                <th style={{ ...invoiceThStyle, textAlign: "right" }}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ch.map((c, i) => (
-                <tr key={i}>
-                  <td style={invoiceTdStyle}>{c.name}</td>
-                  <td style={invoiceTdStyle}>{c.dob ? new Date(c.dob).toLocaleDateString() : "—"}</td>
-                  <td style={invoiceTdStyle}>{c.age}y</td>
-                  <td style={invoiceTdStyle}>{formatCurrency(c.firstHourCharge || 0)}</td>
-                  <td style={invoiceTdStyle}>{c.extensionHours ? `${c.extensionHours}h × ${formatCurrency(c.extensionRate || 0)}` : "—"}</td>
-                  <td style={invoiceTdStyle}>{c.socksOpted ? "Yes" : "—"}</td>
-                  <td style={{ ...invoiceTdStyle, textAlign: "right", fontWeight: 600 }}>{formatCurrency(c.childTotal || 0)}</td>
+          <div className="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th style={invoiceThStyle}>Child</th>
+                  <th style={invoiceThStyle}>DOB</th>
+                  <th style={invoiceThStyle}>Age</th>
+                  <th style={invoiceThStyle}>First Hour</th>
+                  <th style={invoiceThStyle}>Extension</th>
+                  <th style={invoiceThStyle}>Socks</th>
+                  <th style={{ ...invoiceThStyle, textAlign: "right" }}>Total</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {ch.map((c, i) => (
+                  <tr key={i}>
+                    <td style={invoiceTdStyle}>{c.name}</td>
+                    <td style={invoiceTdStyle}>{c.dob ? new Date(c.dob).toLocaleDateString() : "—"}</td>
+                    <td style={invoiceTdStyle}>{c.age}y</td>
+                    <td style={invoiceTdStyle}>{formatCurrency(c.firstHourCharge || 0)}</td>
+                    <td style={invoiceTdStyle}>{c.extensionHours ? `${c.extensionHours}h × ${formatCurrency(c.extensionRate || 0)}` : "—"}</td>
+                    <td style={invoiceTdStyle}>{c.socksOpted ? "Yes" : "—"}</td>
+                    <td style={{ ...invoiceTdStyle, textAlign: "right", fontWeight: 600 }}>{formatCurrency(c.childTotal || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div style={{ fontSize: 11, color: INVOICE_MUTED, marginTop: -4, marginBottom: 6 }}>
             <div>
@@ -1217,61 +1219,63 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             </div>
           </div>
 
-          <table>
-            <thead>
-              <tr>
-                <th style={invoiceThStyle}>Description</th>
-                <th style={invoiceThStyle}>Qty</th>
-                <th style={{ ...invoiceThStyle, textAlign: "right" }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.membership?.applied && (
+          <div className="overflow-x-auto">
+            <table>
+              <thead>
                 <tr>
-                  <td style={invoiceTdStyle}>Membership applied · {invoice.membership.planName}</td>
-                  <td style={invoiceTdStyle}>—</td>
-                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>Session covered</td>
+                  <th style={invoiceThStyle}>Description</th>
+                  <th style={invoiceThStyle}>Qty</th>
+                  <th style={{ ...invoiceThStyle, textAlign: "right" }}>Amount</th>
                 </tr>
-              )}
-              {invoice.membership?.purchase?.price > 0 && (
+              </thead>
+              <tbody>
+                {invoice.membership?.applied && (
+                  <tr>
+                    <td style={invoiceTdStyle}>Membership applied · {invoice.membership.planName}</td>
+                    <td style={invoiceTdStyle}>—</td>
+                    <td style={{ ...invoiceTdStyle, textAlign: "right" }}>Session covered</td>
+                  </tr>
+                )}
+                {invoice.membership?.purchase?.price > 0 && (
+                  <tr>
+                    <td style={invoiceTdStyle}>Membership purchase · {invoice.membership.purchase.planName}</td>
+                    <td style={invoiceTdStyle}>1</td>
+                    <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(invoice.membership.purchase.price)}</td>
+                  </tr>
+                )}
                 <tr>
-                  <td style={invoiceTdStyle}>Membership purchase · {invoice.membership.purchase.planName}</td>
-                  <td style={invoiceTdStyle}>1</td>
-                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(invoice.membership.purchase.price)}</td>
-                </tr>
-              )}
-              <tr>
-                <td style={invoiceTdStyle}>Session charges ({ch.length} child)</td>
-                <td style={invoiceTdStyle}>—</td>
-                <td style={{ ...invoiceTdStyle, textAlign: "right" }}>
-                  {formatCurrency(charges?.normalSessionTotal ?? charges?.sessionTotal ?? 0)}
-                </td>
-              </tr>
-              {!invoice.membership?.applied && invoice.offer?.name && charges?.discountAmount > 0 && (
-                <tr>
-                  <td style={invoiceTdStyle}>Discount — {invoice.offer.name} ({offerTypeLabel(invoice.offer.type)})</td>
+                  <td style={invoiceTdStyle}>Session charges ({ch.length} child)</td>
                   <td style={invoiceTdStyle}>—</td>
-                  <td style={{ ...invoiceTdStyle, textAlign: "right", color: "#059669" }}>
-                    -{formatCurrency(charges.discountAmount)}
+                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>
+                    {formatCurrency(charges?.normalSessionTotal ?? charges?.sessionTotal ?? 0)}
                   </td>
                 </tr>
-              )}
-              {cafeItems.map((item, index) => (
-                <tr key={`${item.name}-${index}`}>
-                  <td style={invoiceTdStyle}>{item.name}</td>
-                  <td style={invoiceTdStyle}>{item.quantity}</td>
-                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(item.lineTotal || 0)}</td>
-                </tr>
-              ))}
-              {charges?.socksQty > 0 && (
-                <tr>
-                  <td style={invoiceTdStyle}>Socks</td>
-                  <td style={invoiceTdStyle}>{charges.socksQty}</td>
-                  <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(charges.socksTotal || 0)}</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                {!invoice.membership?.applied && invoice.offer?.name && charges?.discountAmount > 0 && (
+                  <tr>
+                    <td style={invoiceTdStyle}>Discount — {invoice.offer.name} ({offerTypeLabel(invoice.offer.type)})</td>
+                    <td style={invoiceTdStyle}>—</td>
+                    <td style={{ ...invoiceTdStyle, textAlign: "right", color: "#059669" }}>
+                      -{formatCurrency(charges.discountAmount)}
+                    </td>
+                  </tr>
+                )}
+                {cafeItems.map((item, index) => (
+                  <tr key={`${item.name}-${index}`}>
+                    <td style={invoiceTdStyle}>{item.name}</td>
+                    <td style={invoiceTdStyle}>{item.quantity}</td>
+                    <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(item.lineTotal || 0)}</td>
+                  </tr>
+                ))}
+                {charges?.socksQty > 0 && (
+                  <tr>
+                    <td style={invoiceTdStyle}>Socks</td>
+                    <td style={invoiceTdStyle}>{charges.socksQty}</td>
+                    <td style={{ ...invoiceTdStyle, textAlign: "right" }}>{formatCurrency(charges.socksTotal || 0)}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
           <div style={{ marginTop: 8, paddingTop: 4 }}>
             <InvoiceRow label="Session Charges (18% GST Inclusive)" value={formatCurrency(charges?.normalSessionTotal ?? charges?.sessionTotal ?? 0)} />
@@ -1658,9 +1662,9 @@ function SessionsPage() {
   };
 
   return (
-    <div className="space-y-6 px-6 py-8">
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
       <div>
-        <h1 className="text-3xl font-semibold">Running Bills</h1>
+        <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold">Running Bills</h1>
         <p className="text-muted-foreground mt-1">
           Live unified bills — sessions, cafe and offers accrue together.
         </p>
@@ -1681,7 +1685,7 @@ function SessionsPage() {
             No booked sessions.
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4 lg:gap-5">
             {booked.map((b) => (
               <BillCard
                 key={b._id}
@@ -1717,7 +1721,7 @@ function SessionsPage() {
             No running sessions. Start a session to open one.
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4 lg:gap-5">
             {running.map((b) => (
               <BillCard
                 key={b._id}
@@ -1741,51 +1745,53 @@ function SessionsPage() {
       <section>
         <h2 className="font-semibold mb-3">Recently closed</h2>
         <div className="surface-card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-secondary/60 text-muted-foreground">
-              <tr>
-                <th className="text-left px-4 py-2.5 font-medium">Invoice</th>
-                <th className="text-left px-4 py-2.5 font-medium">Customer</th>
-                <th className="text-left px-4 py-2.5 font-medium">Children</th>
-                <th className="text-left px-4 py-2.5 font-medium">Closed</th>
-                <th className="text-right px-4 py-2.5 font-medium">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {completed.length === 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/60 text-muted-foreground">
                 <tr>
-                  <td
-                    colSpan={5}
-                    className="px-4 py-8 text-center text-muted-foreground"
+                  <th className="text-left px-4 py-2.5 font-medium">Invoice</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Customer</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Children</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Closed</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {completed.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-4 py-8 text-center text-muted-foreground"
+                    >
+                      No completed bills yet.
+                    </td>
+                  </tr>
+                )}
+                {completed.map((b) => (
+                  <tr
+                    key={b._id}
+                    className="border-t border-border hover:bg-secondary/40 cursor-pointer"
+                    onClick={() => openInvoice(b)}
                   >
-                    No completed bills yet.
-                  </td>
-                </tr>
-              )}
-              {completed.map((b) => (
-                <tr
-                  key={b._id}
-                  className="border-t border-border hover:bg-secondary/40 cursor-pointer"
-                  onClick={() => openInvoice(b)}
-                >
-                  <td className="px-4 py-2.5 font-mono text-xs text-primary">
-                    {b.invoice_no}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {b.parentName}
-                    <div className="text-xs text-muted-foreground">
-                      {b.mobileNumber}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5">{b.children?.length ?? 0}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {b.closed_at ? new Date(b.closed_at).toLocaleString() : "—"}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-semibold">{formatCurrency(b?.invoiceData?.charges?.grandTotal || b?.charges?.grandTotal || 0)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <td className="px-4 py-2.5 font-mono text-xs text-primary">
+                      {b.invoice_no}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {b.parentName}
+                      <div className="text-xs text-muted-foreground">
+                        {b.mobileNumber}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5">{b.children?.length ?? 0}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">
+                      {b.closed_at ? new Date(b.closed_at).toLocaleString() : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-semibold">{formatCurrency(b?.invoiceData?.charges?.grandTotal || b?.charges?.grandTotal || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

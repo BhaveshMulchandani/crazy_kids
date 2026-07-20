@@ -65,7 +65,7 @@ export default function Desktopnav() {
   };
 
   return (
-    <header className="h-16 border-b border-slate-200 bg-white px-8 flex items-center justify-end">
+    <header className="h-16 border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8 flex items-center justify-end">
       {/* Right Side */}
       <div className="flex items-center gap-4">
         <div className="relative" ref={rootRef}>

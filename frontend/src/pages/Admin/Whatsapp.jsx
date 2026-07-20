@@ -214,11 +214,11 @@ const Dialog = ({ open, onOpenChange, children }) => (
 const DialogContent = React.forwardRef(({ open, onOpenChange, className, children, ...props }, ref) => {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
       <div className="fixed inset-0 bg-black/40" onClick={() => onOpenChange?.(false)} />
       <div
         ref={ref}
-        className={cn("relative z-10 w-full max-w-xl overflow-hidden rounded-3xl border border-border bg-background p-6 shadow-2xl", className)}
+        className={cn("relative z-10 w-full max-w-xl max-h-[85vh] overflow-y-auto rounded-3xl border border-border bg-background p-6 shadow-2xl", className)}
         onClick={(event) => event.stopPropagation()}
         {...props}
       >
@@ -296,13 +296,13 @@ function Whatsapp() {
   };
 
   return (
-    <div className="space-y-6 px-6 py-8">
-      <div>
-        <h1 className="text-3xl font-semibold flex items-center gap-2"><MessageCircle className="h-7 w-7 text-green-600" /> WhatsApp Business</h1>
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
+      <div className="min-w-0">
+        <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold flex flex-wrap items-center gap-2"><MessageCircle className="h-7 w-7 text-green-600" /> WhatsApp Business</h1>
         <p className="text-muted-foreground mt-1">Campaigns, templates and broadcast history. <span className="text-amber-600">UI preview — provider integration pending.</span></p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 lg:gap-5">
         {stats.map((item) => (
           <Stat key={item.label} label={item.label} value={item.value} icon={item.icon} />
         ))}
@@ -369,11 +369,11 @@ function Whatsapp() {
               <div className="mt-5 grid gap-3 md:grid-cols-2">
                 {templates.map((template) => (
                   <div key={template.id} className="rounded-3xl border border-border bg-muted/10 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-semibold">{template.name}</div>
-                      <span className="text-xs rounded-full bg-primary/10 px-2 py-1 text-primary uppercase">{template.category}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="font-semibold min-w-0 truncate">{template.name}</div>
+                      <span className="text-xs rounded-full bg-primary/10 px-2 py-1 text-primary uppercase shrink-0">{template.category}</span>
                     </div>
-                    <p className="text-sm text-muted-foreground mt-3 whitespace-pre-wrap">{template.body}</p>
+                    <p className="text-sm text-muted-foreground mt-3 whitespace-pre-wrap break-words">{template.body}</p>
                   </div>
                 ))}
               </div>
@@ -411,9 +411,9 @@ function Whatsapp() {
         <TabsContent value="segments">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {SEGMENTS.map((segment) => (
-              <div key={segment.id} className="surface-card rounded-3xl border border-border bg-background p-5 shadow-sm flex items-center justify-between">
-                <div>
-                  <div className="font-semibold">{segment.label}</div>
+              <div key={segment.id} className="surface-card rounded-3xl border border-border bg-background p-5 shadow-sm flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold truncate">{segment.label}</div>
                   <div className="text-sm text-muted-foreground">{segmentCount(segment.id, customers)} customers</div>
                 </div>
                 <Button variant="outline" onClick={() => setOpenCmp(true)}>

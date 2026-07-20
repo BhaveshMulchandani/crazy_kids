@@ -82,12 +82,12 @@ const DialogContent = React.forwardRef(({ className, children, ...props }, ref) 
   const ctx = React.useContext(DialogContext);
   if (!ctx?.open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
       <div className="fixed inset-0 bg-black/70" onClick={() => ctx.onOpenChange?.(false)} />
       <div
         ref={ref}
         className={cn(
-          "relative z-10 w-full max-w-md overflow-hidden rounded-2xl border bg-background p-6 shadow-2xl",
+          "relative z-10 w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border bg-background p-6 shadow-2xl",
           className,
         )}
         onClick={(event) => event.stopPropagation()}
@@ -428,7 +428,7 @@ function Cafepos() {
   };
 
   return (
-    <div className="space-y-5 px-6 py-8">
+    <div className="w-full max-w-[1920px] mx-auto space-y-5 px-6 py-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold flex items-center gap-2">
@@ -438,14 +438,14 @@ function Cafepos() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        <div className="col-span-2 surface-card p-5 space-y-4">
-          <div className="flex gap-3">
-            <div className="relative flex-1">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] gap-5">
+        <div className="min-w-0 surface-card p-5 space-y-4">
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input className="pl-9" placeholder="Search menu…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <div className="flex gap-1 bg-secondary/60 p-1 rounded-xl">
+            <div className="flex flex-wrap gap-1 bg-secondary/60 p-1 rounded-xl">
               {CATS.map((category) => (
                 <button
                   key={category}
@@ -467,7 +467,7 @@ function Cafepos() {
           ) : filtered.length === 0 ? (
             <div className="text-center text-muted-foreground py-16">No items match.</div>
           ) : (
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
               {filtered.map((item) => (
                 <button
                   key={item.id}
@@ -520,14 +520,14 @@ function Cafepos() {
 
             {customer && (
               <div className="mt-3 rounded-xl border bg-secondary/40 p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold">{customer.parentName}</div>
-                    <div className="text-xs text-muted-foreground">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">{customer.parentName}</div>
+                    <div className="text-xs text-muted-foreground truncate">
                       {customer.mobileNumber} · <span className="font-mono text-primary">{customer.sessionNumber}</span>
                     </div>
                   </div>
-                  <button type="button" onClick={() => setCustomer(null)} className="text-muted-foreground hover:text-foreground">
+                  <button type="button" onClick={() => setCustomer(null)} className="text-muted-foreground hover:text-foreground shrink-0">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
@@ -568,11 +568,11 @@ function Cafepos() {
               {cart.map((item, index) => (
                 <div key={item.menu_id} className="rounded-xl border p-3 bg-secondary/30">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1">
-                      <div className="font-medium text-sm">{item.name}</div>
-                      <div className="text-xs text-muted-foreground">₹{item.price} × {item.qty} = ₹{item.price * item.qty}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{item.name}</div>
+                      <div className="text-xs text-muted-foreground truncate">₹{item.price} × {item.qty} = ₹{item.price * item.qty}</div>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       <Button type="button" size="icon" variant="outline" className="h-7 w-7" onClick={() => setQty(index, -1)}>
                         <Minus className="h-3 w-3" />
                       </Button>

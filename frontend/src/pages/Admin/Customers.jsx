@@ -73,10 +73,10 @@ function CustomersPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="space-y-6 px-6 py-8">
+    <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">Customers</h1>
+        <div className="min-w-0">
+          <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold">Customers</h1>
           <p className="text-muted-foreground mt-1">
             {total} registered {total === 1 ? "user" : "users"}
           </p>
@@ -94,6 +94,7 @@ function CustomersPage() {
       </div>
 
       <div className="surface-card overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-secondary/60 text-muted-foreground">
             <tr>
@@ -155,10 +156,11 @@ function CustomersPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {total > 0 && (
-        <div className="flex items-center justify-between px-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <div className="text-xs text-muted-foreground">
             Page {page} of {totalPages} · {total} total
           </div>

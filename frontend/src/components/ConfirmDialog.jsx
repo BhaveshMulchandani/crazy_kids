@@ -24,7 +24,7 @@ const ConfirmDialog = ({
         role="alertdialog"
         aria-modal="true"
         aria-label={title}
-        className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-white p-6 shadow-2xl animate-in-up"
+        className="relative z-10 w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-border bg-white p-6 shadow-2xl animate-in-up"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start gap-4">
