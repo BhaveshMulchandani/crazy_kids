@@ -973,6 +973,29 @@ const invoiceTdStyle = {
 };
 
 
+// Every `<tr>` plus every top-level section of #invoice-print (header, meta
+// grid, session-info line, totals block, footer) is treated as an atomic
+// block: a page break is never allowed to land inside one. Returns their
+// vertical extents in DOM px, relative to the top of `root`, sorted by
+// bottom edge — each `bottom` is a safe place to cut a page.
+const getAvoidBreakRanges = (root) => {
+  const rootTop = root.getBoundingClientRect().top;
+  const toRange = (el) => {
+    const rect = el.getBoundingClientRect();
+    return { top: rect.top - rootTop, bottom: rect.bottom - rootTop };
+  };
+  const ranges = [];
+  Array.from(root.children).forEach((child) => {
+    const rows = child.querySelectorAll?.("tr") ?? [];
+    if (rows.length > 0) {
+      rows.forEach((row) => ranges.push(toRange(row)));
+    } else {
+      ranges.push(toRange(child));
+    }
+  });
+  return ranges.sort((a, b) => a.bottom - b.bottom);
+};
+
 // Rasterizes the exact same #invoice-print DOM node the "Print invoice"
 // button reads (see `print()` below) into a PDF Blob, so the document sent
 // on WhatsApp is always visually identical to what gets printed — one
@@ -980,6 +1003,9 @@ const invoiceTdStyle = {
 const generateInvoicePdfBlob = async () => {
   const node = document.getElementById("invoice-print");
   if (!node) return null;
+
+  const avoidBreakRanges = getAvoidBreakRanges(node);
+  const nodeWidth = node.getBoundingClientRect().width;
 
   // html-to-image serializes the node into an SVG <foreignObject> and lets
   // the browser's own engine paint it, so modern CSS (oklch(), color-mix(),
@@ -996,23 +1022,66 @@ const generateInvoicePdfBlob = async () => {
     throw new Error("Invoice capture produced an empty image (invoice not visible?)");
   }
 
-  const imgData = canvas.toDataURL("image/png");
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
 
-  // Always a single page: fit the invoice inside the printable area (page
-  // minus margins), scaling down if the content is taller than one page.
-  // Centered horizontally so nothing ever touches the page borders.
-  const margin = 36; // 0.5in
+  // Consistent 14mm margin on every side, matching the print stylesheet's
+  // @page margin below. The image is always fit to the full printable
+  // *width* — never shrunk to force everything onto one page. Height
+  // overflow is handled by slicing the canvas across as many pages as the
+  // content actually needs.
+  const margin = Math.round((14 / 25.4) * 72); // 14mm in pt
   const maxWidth = pageWidth - margin * 2;
   const maxHeight = pageHeight - margin * 2;
-  const scale = Math.min(maxWidth / canvas.width, maxHeight / canvas.height);
-  const imgWidth = canvas.width * scale;
-  const imgHeight = canvas.height * scale;
-  const x = (pageWidth - imgWidth) / 2;
 
-  pdf.addImage(imgData, "PNG", x, margin, imgWidth, imgHeight);
+  const canvasToPt = maxWidth / canvas.width; // pt per canvas px
+  const canvasScale = canvas.width / nodeWidth; // canvas px per DOM px
+  const pageHeightInCanvasPx = maxHeight / canvasToPt;
+
+  // Safe cut points, in canvas-pixel space — the bottom edge of every row /
+  // section, so a page break never lands inside one.
+  const breakPoints = avoidBreakRanges
+    .map((r) => r.bottom * canvasScale)
+    .filter((y) => y > 0 && y < canvas.height);
+
+  const sliceCanvas = document.createElement("canvas");
+  const sliceCtx = sliceCanvas.getContext("2d");
+
+  let currentY = 0;
+  let firstPage = true;
+  while (currentY < canvas.height - 1) {
+    const desiredEnd = Math.min(currentY + pageHeightInCanvasPx, canvas.height);
+    let sliceEnd = desiredEnd;
+    if (desiredEnd < canvas.height) {
+      const safe = breakPoints.filter((y) => y > currentY + 1 && y <= desiredEnd);
+      if (safe.length > 0) sliceEnd = safe[safe.length - 1];
+    }
+    // Guard against an atomic block taller than a full page: fall back to a
+    // hard cut so the loop always makes progress.
+    if (sliceEnd <= currentY) sliceEnd = desiredEnd;
+
+    const sliceHeight = Math.round(sliceEnd - currentY);
+    if (sliceHeight <= 0) break;
+
+    sliceCanvas.width = canvas.width;
+    sliceCanvas.height = sliceHeight;
+    sliceCtx.clearRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+    sliceCtx.drawImage(
+      canvas,
+      0, currentY, canvas.width, sliceHeight,
+      0, 0, canvas.width, sliceHeight,
+    );
+
+    const sliceImgData = sliceCanvas.toDataURL("image/png");
+    const sliceHeightPt = sliceHeight * canvasToPt;
+
+    if (!firstPage) pdf.addPage();
+    pdf.addImage(sliceImgData, "PNG", margin, margin, maxWidth, sliceHeightPt);
+    firstPage = false;
+
+    currentY = sliceEnd;
+  }
 
   return pdf.output("blob");
 };
@@ -1035,7 +1104,10 @@ const InvoiceDialog = ({ invoice, onClose }) => {
       @page{size:A4;margin:14mm}
       body{font-family:'Mulish',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;color:#111827;max-width:680px;margin:auto;line-height:1.35}
       h1{margin:0}
-      table{width:100%;border-collapse:collapse;margin:10px 0}
+      table{width:100%;border-collapse:collapse;margin:10px 0;page-break-inside:auto}
+      thead{display:table-header-group}
+      tr{break-inside:avoid;page-break-inside:avoid}
+      .avoid-break{break-inside:avoid;page-break-inside:avoid}
       @media print { body{padding:0;max-width:100%} }
       </style></head><body>${html}</body></html>`);
     w.document.close();
@@ -1133,6 +1205,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
         </DialogHeader>
         <div id="invoice-print" style={{ color: INVOICE_TEXT, fontFamily: "inherit" }}>
           <div
+            className="avoid-break"
             style={{
               display: "flex",
               justifyContent: "space-between",
@@ -1164,6 +1237,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
           </div>
 
           <div
+            className="avoid-break"
             style={{
               marginTop: 10,
               display: "grid",
@@ -1179,7 +1253,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             {customer.city && <div><span style={{ color: INVOICE_MUTED }}>City</span><br />{customer.city}</div>}
           </div>
 
-          <div className="overflow-x-auto">
+          <div>
             <table>
               <thead>
                 <tr>
@@ -1208,7 +1282,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             </table>
           </div>
 
-          <div style={{ fontSize: 11, color: INVOICE_MUTED, marginTop: -4, marginBottom: 6 }}>
+          <div className="avoid-break" style={{ fontSize: 11, color: INVOICE_MUTED, marginTop: -4, marginBottom: 6 }}>
             <div>
               <span style={{ color: INVOICE_TEXT, fontWeight: 600 }}>Session:</span>{" "}
               {start?.toLocaleString()} → {end?.toLocaleString()} ({durMin} min billed)
@@ -1219,7 +1293,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div>
             <table>
               <thead>
                 <tr>
@@ -1348,6 +1422,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
           </div>
 
           <div
+            className="avoid-break"
             style={{
               textAlign: "center",
               marginTop: 12,
