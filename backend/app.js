@@ -33,17 +33,17 @@ connectDB();
 
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
-app.use('/users', userroutes);
-app.use('/menu', menuroutes)
-app.use('/offers', offerroutes)
-app.use('/price', priceroutes)
-app.use('/session', sessionroutes)
-app.use('/cafe', caferoutes)
-app.use('/invoice', invoiceroutes)
-app.use('/memberships', membershiproutes)
-app.use('/admin', adminroutes)
-app.use('/notifications', notificationroutes)
-app.use('/whatsapp-offers', whatsappofferroutes)
+app.use('/api/users', userroutes);
+app.use('/api/menu', menuroutes)
+app.use('/api/offers', offerroutes)
+app.use('/api/price', priceroutes)
+app.use('/api/session', sessionroutes)
+app.use('/api/cafe', caferoutes)
+app.use('/api/invoice', invoiceroutes)
+app.use('/api/memberships', membershiproutes)
+app.use('/api/admin', adminroutes)
+app.use('/api/notifications', notificationroutes)
+app.use('/api/whatsapp-offers', whatsappofferroutes)
 
 app.listen(5000, () => {
   console.log("server is running on port 5000")
