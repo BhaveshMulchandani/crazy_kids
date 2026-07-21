@@ -11,7 +11,9 @@ const invoiceroutes = require('./routes/invoice.routes')
 const membershiproutes = require('./routes/membership.routes')
 const adminroutes = require('./routes/admin.routes')
 const notificationroutes = require('./routes/notification.routes')
+const whatsappofferroutes = require('./routes/whatsappOffer.routes')
 const { startOverdueSessionWatcher } = require('./services/notification.service')
+const { startWhatsappOfferWorker } = require('./workers/whatsappOffer.worker')
 const cors = require('cors');
 const cookieParser = require("cookie-parser");
 
@@ -41,8 +43,16 @@ app.use('/invoice', invoiceroutes)
 app.use('/memberships', membershiproutes)
 app.use('/admin', adminroutes)
 app.use('/notifications', notificationroutes)
+app.use('/whatsapp-offers', whatsappofferroutes)
 
 app.listen(5000, () => {
   console.log("server is running on port 5000")
   startOverdueSessionWatcher();
+  try {
+    startWhatsappOfferWorker();
+  } catch (error) {
+    // Missing/unreachable REDIS_URL shouldn't take the whole API down —
+    // only offer-broadcast sending is affected until it's configured.
+    console.error("[app] WhatsApp offer worker not started:", error.message);
+  }
 })

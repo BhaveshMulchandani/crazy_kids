@@ -17,11 +17,83 @@ const formatDestination = (mobileNumber) => {
   return `+${withCountryCode}`;
 };
 
-const readConfig = () => {
+// `campaignNameEnvVar` lets callers point at a different approved TrdAI
+// template (e.g. WHATSAPP_OFFER_CAMPAIGN_NAME for offer broadcasts) while
+// sharing the same apiKey/baseUrl — those two are account-level, not
+// per-template.
+const readConfig = (campaignNameEnvVar = "TRADAI_CAMPAIGN_NAME") => {
   const apiKey = process.env.TRADAI_API_KEY;
-  const campaignName = process.env.TRADAI_CAMPAIGN_NAME;
+  const campaignName = process.env[campaignNameEnvVar];
   const baseUrl = process.env.TRADAI_BASE_URL;
   return { apiKey, campaignName, baseUrl };
+};
+
+// Shared HTTP mechanics for every TrdAI campaign-trigger call — building the
+// request, parsing the response, and normalizing success/failure. Both
+// sendInvoice and sendOffer build their own `payload` (different
+// templateParams/media) and hand it here so the request/response handling
+// (including TrdAI's string-"false" success quirk) only lives in one place.
+const postCampaignTrigger = async (payload, { logLabel, baseUrl }) => {
+  const { apiKey: _apiKey, ...payloadForLogging } = payload;
+  console.log(`[whatsapp.service] ${logLabel} request payload (apiKey omitted):`, JSON.stringify(payloadForLogging));
+
+  let response;
+  let body;
+  try {
+    response = await fetch(`${baseUrl.replace(/\/$/, "")}${TRADAI_TRIGGER_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const rawText = await response.text();
+    try {
+      body = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      body = rawText;
+    }
+  } catch (networkError) {
+    console.error(`[whatsapp.service] ${logLabel} network error`, networkError.name, networkError.message);
+    const error = new Error(
+      networkError.name === "TimeoutError"
+        ? "WhatsApp API request timed out."
+        : "Unable to reach WhatsApp API."
+    );
+    error.statusCode = 502;
+    throw error;
+  }
+
+  console.log(`[whatsapp.service] ${logLabel} response`, { status: response.status, body });
+
+  // A 2xx HTTP status alone isn't proof of success — TrdAI's own
+  // success/failure flag has been observed as the *string* "true"/"false"
+  // rather than a boolean (e.g. {"success":"true","submitted_message_id":
+  // "..."}), so a strict `=== false` check would silently miss a
+  // string-"false" failure. Normalize before comparing.
+  const successFlag = body && typeof body === "object" ? body.success : undefined;
+  const successFlagIsFalse =
+    successFlag === false || (typeof successFlag === "string" && successFlag.toLowerCase() === "false");
+  const bodyIndicatesFailure =
+    body && typeof body === "object" && (body.status === "error" || successFlagIsFalse || body.error);
+
+  if (!response.ok || bodyIndicatesFailure) {
+    const message =
+      (body && typeof body === "object" && (body.message || body.msg || body.error)) ||
+      (typeof body === "string" && body) ||
+      `WhatsApp API request failed with status ${response.status}`;
+    // Explicit, unambiguous failure log — the complete TrdAI error body,
+    // not just the derived `message` string being thrown.
+    console.error(`[whatsapp.service] ${logLabel}: TrdAI reported failure`, {
+      status: response.status,
+      body,
+      derivedMessage: message,
+    });
+    const error = new Error(message);
+    error.statusCode = response.status >= 400 ? response.status : 502;
+    throw error;
+  }
+
+  return { success: true, data: body };
 };
 
 // Sends one campaign-triggered WhatsApp message with a media attachment.
@@ -78,69 +150,50 @@ const sendInvoice = async ({ destination, userName, invoiceNumber, grandTotal, r
     },
   };
 
-  // Log the exact outgoing JSON payload for debugging — apiKey omitted,
-  // every other field (including templateParams/media) logged as-is so a
-  // TrdAI rejection can be diagnosed from what we actually sent.
-  const { apiKey: _apiKey, ...payloadForLogging } = payload;
-  console.log("[whatsapp.service] request payload (apiKey omitted):", JSON.stringify(payloadForLogging));
-
-  let response;
-  let body;
-  try {
-    response = await fetch(`${baseUrl.replace(/\/$/, "")}${TRADAI_TRIGGER_PATH}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    const rawText = await response.text();
-    try {
-      body = rawText ? JSON.parse(rawText) : null;
-    } catch {
-      body = rawText;
-    }
-  } catch (networkError) {
-    console.error("[whatsapp.service] network error", networkError.name, networkError.message);
-    const error = new Error(
-      networkError.name === "TimeoutError"
-        ? "WhatsApp API request timed out."
-        : "Unable to reach WhatsApp API."
-    );
-    error.statusCode = 502;
-    throw error;
-  }
-
-  console.log("[whatsapp.service] response", { status: response.status, body });
-
-  // A 2xx HTTP status alone isn't proof of success — TrdAI's own
-  // success/failure flag has been observed as the *string* "true"/"false"
-  // rather than a boolean (e.g. {"success":"true","submitted_message_id":
-  // "..."}), so a strict `=== false` check would silently miss a
-  // string-"false" failure. Normalize before comparing.
-  const successFlag = body && typeof body === "object" ? body.success : undefined;
-  const successFlagIsFalse =
-    successFlag === false || (typeof successFlag === "string" && successFlag.toLowerCase() === "false");
-  const bodyIndicatesFailure =
-    body && typeof body === "object" && (body.status === "error" || successFlagIsFalse || body.error);
-
-  if (!response.ok || bodyIndicatesFailure) {
-    const message =
-      (body && typeof body === "object" && (body.message || body.msg || body.error)) ||
-      (typeof body === "string" && body) ||
-      `WhatsApp API request failed with status ${response.status}`;
-    // Explicit, unambiguous failure log — the complete TrdAI error body,
-    // not just the derived `message` string being thrown.
-    console.error("[whatsapp.service] TrdAI reported failure", {
-      status: response.status,
-      body,
-      derivedMessage: message,
-    });
-    const error = new Error(message);
-    error.statusCode = response.status >= 400 ? response.status : 502;
-    throw error;
-  }
-
-  return { success: true, data: body };
+  return postCampaignTrigger(payload, { logLabel: "invoice", baseUrl });
 };
 
-module.exports = { sendInvoice };
+// Sends one campaign-triggered WhatsApp message for an offer broadcast.
+// Same TrdAI campaign-trigger contract as sendInvoice, but under its own
+// campaign name (WHATSAPP_OFFER_CAMPAIGN_NAME) since offer broadcasts use a
+// different approved template than the invoice one — and there is no PDF,
+// so no `media` key is sent. templateParams maps 1:1 onto that template's
+// body placeholders — {{1}} Parent Name, {{2}} Offer Name, {{3}} Offer
+// detail.
+const sendOffer = async ({ destination, userName, offerName, offerHighlight }) => {
+  const { apiKey, campaignName, baseUrl } = readConfig("WHATSAPP_OFFER_CAMPAIGN_NAME");
+
+  if (!apiKey || !campaignName || !baseUrl) {
+    const error = new Error("WhatsApp offer sending is not configured on the server.");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const formattedDestination = formatDestination(destination);
+  if (!formattedDestination) {
+    const error = new Error("Customer mobile number not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const payload = {
+    apiKey,
+    campaignName,
+    destination: formattedDestination,
+    userName: userName || "Customer",
+    // Static lead-source label (not user data) so every offer broadcast is
+    // filterable/segmentable as its own source in the TrdAI dashboard —
+    // that dashboard is the only place delivery/analytics get monitored,
+    // per the "no in-app analytics" requirement for this feature.
+    source: "admin-offer-broadcast",
+    templateParams: [
+      String(userName || "Customer"),
+      String(offerName || "-"),
+      String(offerHighlight || "-"),
+    ],
+  };
+
+  return postCampaignTrigger(payload, { logLabel: "offer", baseUrl });
+};
+
+module.exports = { sendInvoice, sendOffer };
