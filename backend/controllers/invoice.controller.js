@@ -523,7 +523,7 @@ const sendInvoiceWhatsApp = async (req, res) => {
       return res.status(404).json({ message: "Invoice PDF not found." });
     }
 
-    const mediaUrl = `${publicBaseUrl.replace(/\/$/, "")}/invoice/${invoice._id}/pdf`;
+    const mediaUrl = `${publicBaseUrl.replace(/\/$/, "")}/api/invoice/${invoice._id}/pdf`;
     console.log("[invoice.controller] send-whatsapp: generated media URL", { invoiceId, mediaUrl });
 
     const expectedBuffer = toPdfBuffer(invoice.pdf.data);
