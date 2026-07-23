@@ -196,4 +196,41 @@ const sendOffer = async ({ destination, userName, offerName, offerHighlight }) =
   return postCampaignTrigger(payload, { logLabel: "offer", baseUrl });
 };
 
-module.exports = { sendInvoice, sendOffer };
+// Sends one campaign-triggered WhatsApp message for a child's birthday.
+// Same TrdAI campaign-trigger contract as sendInvoice/sendOffer, but under
+// its own campaign name (BIRTHDAY_CAMPAIGN_NAME) since it uses its own
+// approved template — no PDF, so no `media` key. templateParams maps 1:1
+// onto that template's body placeholders — {{1}} Parent Name, {{2}} Child
+// Name.
+const sendBirthday = async ({ destination, userName, childName }) => {
+  const { apiKey, campaignName, baseUrl } = readConfig("BIRTHDAY_CAMPAIGN_NAME");
+
+  if (!apiKey || !campaignName || !baseUrl) {
+    const error = new Error("WhatsApp birthday sending is not configured on the server.");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const formattedDestination = formatDestination(destination);
+  if (!formattedDestination) {
+    const error = new Error("Customer mobile number not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const payload = {
+    apiKey,
+    campaignName,
+    destination: formattedDestination,
+    userName: userName || "Customer",
+    source: "birthday-cron",
+    templateParams: [
+      String(userName || "Customer"),
+      String(childName || "your little one"),
+    ],
+  };
+
+  return postCampaignTrigger(payload, { logLabel: "birthday", baseUrl });
+};
+
+module.exports = { sendInvoice, sendOffer, sendBirthday };

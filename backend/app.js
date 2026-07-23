@@ -14,6 +14,7 @@ const notificationroutes = require('./routes/notification.routes')
 const whatsappofferroutes = require('./routes/whatsappOffer.routes')
 const { startOverdueSessionWatcher } = require('./services/notification.service')
 const { startWhatsappOfferWorker } = require('./workers/whatsappOffer.worker')
+const { startBirthdayCron } = require('./cron/birthdayCron')
 const cors = require('cors');
 const cookieParser = require("cookie-parser");
 
@@ -54,5 +55,12 @@ app.listen(5000, () => {
     // Missing/unreachable REDIS_URL shouldn't take the whole API down —
     // only offer-broadcast sending is affected until it's configured.
     console.error("[app] WhatsApp offer worker not started:", error.message);
+  }
+  try {
+    startBirthdayCron();
+  } catch (error) {
+    // A scheduling failure shouldn't take the whole API down — only the
+    // birthday campaign is affected until it's fixed.
+    console.error("[app] Birthday cron not started:", error.message);
   }
 })
