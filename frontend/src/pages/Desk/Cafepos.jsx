@@ -434,7 +434,7 @@ function Cafepos() {
           <h1 className="text-3xl font-semibold flex items-center gap-2">
             <Coffee className="h-7 w-7 text-primary" /> Cafe POS
           </h1>
-          <p className="text-muted-foreground mt-1">Restaurant-style ordering — tap items to add.</p>
+          <p className="text-muted-foreground mt-1">Restaurant-style ordering - tap items to add.</p>
         </div>
       </div>
 

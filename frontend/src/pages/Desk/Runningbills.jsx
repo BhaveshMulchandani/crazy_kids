@@ -1741,7 +1741,7 @@ function SessionsPage() {
       <div>
         <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold">Running Bills</h1>
         <p className="text-muted-foreground mt-1">
-          Live unified bills — sessions, cafe and offers accrue together.
+          Live unified bills - sessions, cafe and offers accrue together.
         </p>
       </div>
 

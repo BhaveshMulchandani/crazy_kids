@@ -22,7 +22,7 @@ app.use(
   cors({ 
     // "http://localhost:5173"
     origin: [
-            "https://crazy-kids-psi.vercel.app",
+             "http://localhost:5173",
       "https://pos.sosiyo.com"
     ],
     credentials: true,
