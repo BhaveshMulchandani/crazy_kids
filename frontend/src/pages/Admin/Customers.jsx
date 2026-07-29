@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Award, ChevronLeft, ChevronRight, Search, Users as UsersIcon } from "lucide-react";
 import axios from "axios";
+import { getDisplayName } from "../../utils/customerDisplay";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -100,7 +101,7 @@ function CustomersPage() {
             <tr>
               <Th>Customer ID</Th>
               <Th>Child</Th>
-              <Th>Parent</Th>
+              <Th>Parent Name / Guardian Name</Th>
               <Th>Mobile</Th>
               <Th className="text-right">Visits</Th>
               <Th className="text-right">Points</Th>
@@ -135,7 +136,7 @@ function CustomersPage() {
                       ? customer.children.map((child) => child.name).join(", ")
                       : "-"}
                   </td>
-                  <td className="px-5 py-3.5">{customer.parentName}</td>
+                  <td className="px-5 py-3.5">{getDisplayName(customer)}</td>
                   <td className="px-5 py-3.5">{customer.mobileNumber}</td>
                   <td className="px-5 py-3.5 text-right">
                     {customer.visit_count}

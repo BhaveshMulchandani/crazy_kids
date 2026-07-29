@@ -24,6 +24,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { toCanvas } from "html-to-image";
 import jsPDF from "jspdf";
+import { getDisplayName } from "../../utils/customerDisplay";
 
 // Helper functions
 const elapsedSeconds = (bill) => {
@@ -59,22 +60,40 @@ const offerTypeLabel = (type) => OFFER_TYPE_LABELS[type] || type || "—";
 // Elapsed time for one child, same math as elapsedSeconds(bill) above but
 // against the child's own timer.pauseHistory — so an individually paused
 // child freezes while the rest of the session keeps counting.
+//
+// Also caps at the child's own timer.scheduledEndTime (maintained by the
+// backend alongside the main session's scheduledEndTime — shifted forward on
+// every pause/resume and extension, both main-session and per-child). Once
+// "now" passes that cap, `now` is clamped to it, so both the elapsed total
+// and the ongoing-pause deduction stop advancing — the child's personal
+// timer freezes at their allotted active play time instead of counting up
+// forever.
 const elapsedSecondsForChild = (bill, child) => {
   if (!bill.startTime) return 0;
   const start = new Date(bill.startTime);
-  const now = new Date();
+  const rawNow = new Date();
+  const cap = child?.timer?.scheduledEndTime ? new Date(child.timer.scheduledEndTime) : null;
+  const now = cap && cap < rawNow ? cap : rawNow;
   const pausedMilliseconds = (child?.timer?.pauseHistory || []).reduce((total, pause) => {
     if (!pause?.pausedAt) return total;
+    const pausedAt = new Date(pause.pausedAt);
+    if (pausedAt >= now) return total;
     const pauseEnd = pause.resumedAt ? new Date(pause.resumedAt) : now;
-    return total + Math.max(0, pauseEnd.getTime() - new Date(pause.pausedAt).getTime());
+    const cappedPauseEnd = pauseEnd > now ? now : pauseEnd;
+    return total + Math.max(0, cappedPauseEnd.getTime() - pausedAt.getTime());
   }, 0);
   const diff = now.getTime() - start.getTime() - pausedMilliseconds;
   return Math.max(0, Math.floor(diff / 1000));
 };
 
+// A group booking has no per-child socksOpted flags to count — it collects a
+// single "how many socks does the group need" headcount instead (see
+// billing.service.js).
 const calculateSocksCharge = (bill, pricingSettings) => {
   const children = bill?.children ?? [];
-  const socksQty = children.filter((child) => child?.socksOpted).length;
+  const socksQty = bill?.groupBooking?.isGroup
+    ? Number(bill.groupBooking.socksRequired || 0)
+    : children.filter((child) => child?.socksOpted).length;
   const socksTotal = socksQty * Number(pricingSettings?.socksCost ?? 0);
   return { socksQty, socksTotal };
 };
@@ -102,14 +121,23 @@ const dayName = (date) => new Intl.DateTimeFormat("en-US", { weekday: "long" }).
 // configured conditions (e.g. minKids) are satisfied.
 const calculateSessionCharge = (bill, pricingSettings) => {
   const children = bill?.children ?? [];
+  // A group booking (10-20+ kids, no per-child entries) prices by headcount
+  // instead of iterating `children` — see billing.service.js. Every place
+  // below that needs "how many kids are on this session" uses `childCount`.
+  const groupBooking = bill?.groupBooking?.isGroup ? bill.groupBooking : null;
+  const childCount = groupBooking ? Number(groupBooking.totalChildren || 0) : children.length;
+
+  // Group bookings never carry a membership (see session.controller.js), so
+  // this can only ever be true for a normal booking.
   const membershipApplied = Boolean(
-    bill?.membership &&
+    !groupBooking &&
+      bill?.membership &&
       Number(bill.membership.remainingPlayHours || 0) >= Number(bill.totalHours || 1) &&
-      Number(bill.membership.kidsAllowed || 0) >= children.length,
+      Number(bill.membership.kidsAllowed || 0) >= childCount,
   );
 
   if (membershipApplied) {
-    return { subtotal: 0, total: 0, membershipApplied: true, discountAmount: 0, offer: null };
+    return { subtotal: 0, total: 0, membershipApplied: true, discountAmount: 0, offer: null, breakdown: [] };
   }
 
   const offer = bill?.offer?.active === false ? null : bill?.offer || null;
@@ -117,9 +145,7 @@ const calculateSessionCharge = (bill, pricingSettings) => {
     offer?.type === "special_pricing" &&
     String(offer.rules?.day || "").toLowerCase() === dayName(new Date()).toLowerCase();
 
-  const subtotal = children.reduce((total, child) => {
-    const age = child?.age ?? 0;
-    const isUnder3 = age < 3;
+  const rateFor = (isUnder3) => {
     const normalFirst = isUnder3
       ? Number(pricingSettings?.firstHourUnder3 ?? 0)
       : Number(pricingSettings?.firstHourAbove3 ?? 0);
@@ -128,14 +154,33 @@ const calculateSessionCharge = (bill, pricingSettings) => {
       : Number(pricingSettings?.extensionAbove3 ?? 0);
     const firstHourRate = specialDayMatches ? Number(offer.rules?.firstHourPrice || 0) : normalFirst;
     const extensionRate = specialDayMatches ? Number(offer.rules?.nextHourPrice || 0) : normalExtension;
-    return (
-      total +
-      firstHourRate +
-      Math.max((bill?.totalHours ?? 1) - 1, 0) * extensionRate
-    );
-  }, 0);
+    return firstHourRate + Math.max((bill?.totalHours ?? 1) - 1, 0) * extensionRate;
+  };
 
-  const offerConditionsMet = offer && children.length >= Number(offer.rules?.minKids || Infinity);
+  // Per-row breakdown for display — two summary rows (above/below 3y) for a
+  // group booking, one row per named child otherwise.
+  const breakdown = groupBooking
+    ? [
+        Number(groupBooking.aboveThreeCount || 0) > 0 && {
+          name: `Children above 3 years (${groupBooking.aboveThreeCount})`,
+          age: null,
+          amount: round2(Number(groupBooking.aboveThreeCount || 0) * rateFor(false)),
+        },
+        Number(groupBooking.belowThreeCount || 0) > 0 && {
+          name: `Children below 3 years (${groupBooking.belowThreeCount})`,
+          age: null,
+          amount: round2(Number(groupBooking.belowThreeCount || 0) * rateFor(true)),
+        },
+      ].filter(Boolean)
+    : children.map((child) => ({
+        name: child?.name || "",
+        age: child?.age ?? null,
+        amount: round2(rateFor((child?.age ?? 0) < 3)),
+      }));
+
+  const subtotal = round2(breakdown.reduce((total, row) => total + row.amount, 0));
+
+  const offerConditionsMet = offer && childCount >= Number(offer.rules?.minKids || Infinity);
   let discountAmount = 0;
   if (offer?.type === "discount" && offerConditionsMet) {
     discountAmount = round2((subtotal * Number(offer.value || 0)) / 100);
@@ -149,6 +194,7 @@ const calculateSessionCharge = (bill, pricingSettings) => {
     membershipApplied: false,
     discountAmount,
     offer: discountAmount > 0 || specialDayMatches ? offer : null,
+    breakdown,
   };
 };
 
@@ -508,7 +554,7 @@ const BillCard = ({
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className="min-w-0 truncate font-bold text-base leading-tight tracking-tight">
-              {bill.parentName}
+              {getDisplayName(bill)}
             </div>
 
             {hasBirthday && (
@@ -567,7 +613,7 @@ const BillCard = ({
               <span className="flex min-w-0 items-center gap-1">
                 {isBirthday ? "🎂" : <Baby className="h-3 w-3 shrink-0" />}
                 <span className="truncate font-medium">
-                  {c.name} · {c.age}y
+                  {c.name}{c.age != null ? ` · ${c.age}y` : ""}
                 </span>
                 {c.socksOpted && <span title="Socks opted">🧦</span>}
               </span>
@@ -756,7 +802,8 @@ const CheckoutDialog = ({
 }) => {
   const bill = bills.find((b) => b._id === billId);
   const [submitting, setSubmitting] = useState(false);
-  const [extraDiscount, setExtraDiscount] = useState("");
+  const [extraDiscountType, setExtraDiscountType] = useState("flat");
+  const [extraDiscountValue, setExtraDiscountValue] = useState("");
   const sessionCharge = calculateSessionCharge(bill, pricingSettings);
   const foodCharge = calculateFoodCharge({
     ...bill,
@@ -765,12 +812,25 @@ const CheckoutDialog = ({
   const socksCharge = calculateSocksCharge(bill, pricingSettings);
   const membershipPurchaseTotal = Number(bill?.membershipPurchase?.price || 0);
   const preDiscountTotal = sessionCharge.total + foodCharge.total + socksCharge.socksTotal + membershipPurchaseTotal;
-  // Operator-entered discount on top of any offer/membership pricing —
-  // capped so it can never push the payable amount below zero.
-  const extraDiscountAmount = Math.min(Math.max(Number(extraDiscount) || 0, 0), preDiscountTotal);
+  // Operator-entered discount on top of any offer/membership pricing — either
+  // a flat ₹ amount or a % of the pre-discount total. Clamped so a percentage
+  // never exceeds 100%, negative values are rejected, and the resulting
+  // amount can never push the payable total below zero. Mirrors the backend
+  // clamp in billing.service.js, which is the authority — this is only a
+  // live preview.
+  const rawExtraDiscountValue = Math.max(Number(extraDiscountValue) || 0, 0);
+  const extraDiscountAmount =
+    extraDiscountType === "percentage"
+      ? round2(preDiscountTotal * (Math.min(rawExtraDiscountValue, 100) / 100))
+      : Math.min(rawExtraDiscountValue, preDiscountTotal);
   const total = preDiscountTotal - extraDiscountAmount;
   const paymentSummary = getSessionPaymentSummary(bill, { total });
-  const loyaltyPoints = calculateLoyaltyPoints(total, pricingSettings);
+  // No loyalty points at all when any child in the session has their
+  // birthday today — mirrors the same exemption billing.service.js applies
+  // at checkout, so this preview never shows points the confirmed invoice
+  // won't actually award.
+  const hasBirthdayChild = (bill?.children || []).some((child) => isBirthdayChild(child));
+  const loyaltyPoints = hasBirthdayChild ? 0 : calculateLoyaltyPoints(total, pricingSettings);
 
   if (!bill) return null;
 
@@ -780,7 +840,7 @@ const CheckoutDialog = ({
     try {
       await axios.patch(
         `${import.meta.env.VITE_API_URL}/session/complete/${bill._id}`,
-        { extraDiscount: extraDiscountAmount },
+        { extraDiscountType, extraDiscountValue: rawExtraDiscountValue },
         { withCredentials: true },
       );
 
@@ -812,7 +872,7 @@ const CheckoutDialog = ({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto bg-white">
         <DialogHeader>
-          <DialogTitle>Checkout · {bill.parentName}</DialogTitle>
+          <DialogTitle>Checkout · {getDisplayName(bill)}</DialogTitle>
         </DialogHeader>
         <div className="text-sm">
           <div className="rounded-xl border border-border/60 bg-secondary/30 p-4 space-y-0.5">
@@ -834,12 +894,9 @@ const CheckoutDialog = ({
             <div className="border-t border-dashed border-border/60 my-1.5 pt-1">
               <Row k="Final Session Charges" v={formatCurrency(sessionCharge.total)} bold />
             </div>
-            {bill.children?.map((c, i) => (
+            {sessionCharge.breakdown?.map((row, i) => (
               <div key={i} className="text-xs text-muted-foreground pl-3">
-                ↳ {c.name} ({c.age}y):{" "}
-                {formatCurrency(
-                  sessionCharge.total / Math.max(bill.children?.length || 1, 1),
-                )}
+                ↳ {row.name}{row.age != null ? ` (${row.age}y)` : ""}: {formatCurrency(row.amount)}
               </div>
             ))}
           </div>
@@ -861,13 +918,33 @@ const CheckoutDialog = ({
           </div>
 
           <div className="space-y-1.5 mt-3">
-            <Label className="text-xs">Extra discount (₹)</Label>
+            <Label className="text-xs">Extra discount</Label>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="extraDiscountType"
+                  checked={extraDiscountType === "flat"}
+                  onChange={() => setExtraDiscountType("flat")}
+                />
+                ₹ Flat Amount
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="extraDiscountType"
+                  checked={extraDiscountType === "percentage"}
+                  onChange={() => setExtraDiscountType("percentage")}
+                />
+                Percentage (%)
+              </label>
+            </div>
             <Input
               type="number"
               min="0"
-              max={preDiscountTotal}
-              value={extraDiscount}
-              onChange={(e) => setExtraDiscount(e.target.value)}
+              max={extraDiscountType === "percentage" ? 100 : preDiscountTotal}
+              value={extraDiscountValue}
+              onChange={(e) => setExtraDiscountValue(e.target.value)}
               placeholder="0"
             />
           </div>
@@ -881,7 +958,12 @@ const CheckoutDialog = ({
 
           {extraDiscountAmount > 0 && (
             <div className="mt-3">
-              <Row k="Extra Discount" v={`-${formatCurrency(extraDiscountAmount)}`} accent="oklch(0.62 0.17 155)" bold />
+              <Row
+                k={`Extra Discount (${extraDiscountType === "percentage" ? `${Math.min(rawExtraDiscountValue, 100)}%` : "Flat"})`}
+                v={`-${formatCurrency(extraDiscountAmount)}`}
+                accent="oklch(0.62 0.17 155)"
+                bold
+              />
             </div>
           )}
 
@@ -1247,7 +1329,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               fontSize: 11.5,
             }}
           >
-            <div><span style={{ color: INVOICE_MUTED }}>Parent</span><br />{customer.parentName || invoice.parentName} · {customer.mobileNumber || invoice.mobileNumber}</div>
+            <div><span style={{ color: INVOICE_MUTED }}>Parent Name / Guardian Name</span><br />{getDisplayName({ parentName: customer.parentName || invoice.parentName, children: ch })} · {customer.mobileNumber || invoice.mobileNumber}</div>
             <div><span style={{ color: INVOICE_MUTED }}>Band</span><br />{customer.bandNumber || invoice.bandNumber || "—"}</div>
             <div><span style={{ color: INVOICE_MUTED }}>Session</span><br />{customer.sessionNumber || invoice.sessionNumber || "—"}</div>
             {customer.city && <div><span style={{ color: INVOICE_MUTED }}>City</span><br />{customer.city}</div>}
@@ -1271,7 +1353,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
                   <tr key={i}>
                     <td style={invoiceTdStyle}>{c.name}</td>
                     <td style={invoiceTdStyle}>{c.dob ? new Date(c.dob).toLocaleDateString() : "—"}</td>
-                    <td style={invoiceTdStyle}>{c.age}y</td>
+                    <td style={invoiceTdStyle}>{c.age != null ? `${c.age}y` : "—"}</td>
                     <td style={invoiceTdStyle}>{formatCurrency(c.firstHourCharge || 0)}</td>
                     <td style={invoiceTdStyle}>{c.extensionHours ? `${c.extensionHours}h × ${formatCurrency(c.extensionRate || 0)}` : "—"}</td>
                     <td style={invoiceTdStyle}>{c.socksOpted ? "Yes" : "—"}</td>
@@ -1318,7 +1400,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
                   </tr>
                 )}
                 <tr>
-                  <td style={invoiceTdStyle}>Session charges ({ch.length} child)</td>
+                  <td style={invoiceTdStyle}>Session charges ({invoice.groupBooking?.totalChildren || ch.length} child)</td>
                   <td style={invoiceTdStyle}>—</td>
                   <td style={{ ...invoiceTdStyle, textAlign: "right" }}>
                     {formatCurrency(charges?.normalSessionTotal ?? charges?.sessionTotal ?? 0)}
@@ -1396,7 +1478,12 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
             {charges?.extraDiscountAmount > 0 && (
               <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 6, paddingTop: 4 }}>
-                <InvoiceRow label="Extra Discount" value={`-${formatCurrency(charges.extraDiscountAmount)}`} color="#059669" bold />
+                <InvoiceRow
+                  label={`Extra Discount (${charges.extraDiscountType === "percentage" ? `${charges.extraDiscountValue}%` : "Flat"})`}
+                  value={`-${formatCurrency(charges.extraDiscountAmount)}`}
+                  color="#059669"
+                  bold
+                />
               </div>
             )}
 
@@ -1565,6 +1652,18 @@ function SessionsPage() {
     loadSessions();
   }, [loadSessions]);
 
+  // Keeps session/cafe data (and therefore the live Pending Amount) in sync
+  // even when nothing on this page triggers a reload — e.g. cafe items added
+  // from another desk terminal, or an operator leaving this tab open for a
+  // while. loadSessions() already no-ops quietly on failure, so this is safe
+  // to run silently in the background.
+  useEffect(() => {
+    const poll = setInterval(() => {
+      loadSessions();
+    }, 10000);
+    return () => clearInterval(poll);
+  }, [loadSessions]);
+
   // Deep-linked from a "session waiting for checkout" notification —
   // scroll the matching card into view and briefly highlight it.
   useEffect(() => {
@@ -1722,7 +1821,10 @@ function SessionsPage() {
       sessionCharge: Number(charges.sessionTotal || 0),
       foodCharge: Number(charges.cafeTotal || 0),
       total: Number(charges.grandTotal || 0),
-      loyaltyPoints: Number(charges.loyaltyPoints || calculateLoyaltyPoints(charges.grandTotal || 0, pricingSettings)),
+      // `??`, not `||` — a birthday session legitimately earns exactly 0
+      // points, and `||` would treat that 0 as "missing" and silently
+      // recompute a nonzero fallback value instead of showing the real one.
+      loyaltyPoints: Number(charges.loyaltyPoints ?? calculateLoyaltyPoints(charges.grandTotal || 0, pricingSettings)),
       invoice_no: invoiceData?.invoiceNumber || completedBill.invoice_no,
       invoiceId: invoiceData?._id || completedBill.invoiceId,
     };
@@ -1852,7 +1954,7 @@ function SessionsPage() {
                       {b.invoice_no}
                     </td>
                     <td className="px-4 py-2.5">
-                      {b.parentName}
+                      {getDisplayName(b)}
                       <div className="text-xs text-muted-foreground">
                         {b.mobileNumber}
                       </div>

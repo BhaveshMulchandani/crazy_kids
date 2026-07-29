@@ -2,6 +2,7 @@ const cafemodel = require("../models/cafe.model");
 const menumodel = require("../models/menu.model");
 const sessionmodel = require("../models/session.model");
 const { getNextFormattedNumber } = require("../services/counter.service");
+const { buildCustomerNameOr } = require("../utils/customerSearch");
 
 const searchCustomer = async (req, res) => {
   try {
@@ -19,17 +20,15 @@ const searchCustomer = async (req, res) => {
           $in: ["running", "paused"],
         },
         $or: [
-          {
-            parentName: {
-              $regex: `^${q}$`,
-              $options: "i",
-            },
-          },
+          ...buildCustomerNameOr(q, { exact: true }),
           {
             mobileNumber: q,
           },
           {
             bandNumber: q,
+          },
+          {
+            sessionNumber: q,
           },
         ],
       })

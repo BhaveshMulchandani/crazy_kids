@@ -41,8 +41,23 @@ const invoiceSchema = new mongoose.Schema(
         extensionRate: { type: Number, default: 0 },
         childTotal: { type: Number, default: 0 },
         socksOpted: { type: Boolean, default: false },
+        // Set (>0) only for a group-booking summary row, where this entry
+        // represents `groupCount` children above/below 3y rather than one
+        // named child — see billing.service.js.
+        groupCount: { type: Number, default: 0 },
       },
     ],
+
+    // Present only when this invoice's session was a group booking (see
+    // session.model.js) — kept alongside `children`'s two group-summary
+    // rows purely as structured metadata for reporting/display.
+    groupBooking: {
+      representativeChildName: { type: String, default: "" },
+      totalChildren: { type: Number, default: 0 },
+      aboveThreeCount: { type: Number, default: 0 },
+      belowThreeCount: { type: Number, default: 0 },
+      socksRequired: { type: Number, default: 0 },
+    },
 
     sessionDetails: {
       startTime: { type: Date, default: null },
@@ -72,6 +87,8 @@ const invoiceSchema = new mongoose.Schema(
       normalSessionTotal: { type: Number, default: 0 },
       discountAmount: { type: Number, default: 0 },
       extraDiscountAmount: { type: Number, default: 0 },
+      extraDiscountType: { type: String, enum: ["flat", "percentage"], default: "flat" },
+      extraDiscountValue: { type: Number, default: 0 },
       membershipPurchaseTotal: { type: Number, default: 0 },
       socksQty: { type: Number, default: 0 },
       socksRate: { type: Number, default: 0 },

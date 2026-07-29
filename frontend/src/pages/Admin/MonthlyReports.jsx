@@ -63,24 +63,34 @@ const YEARS = Array.from({ length: 6 }, (_, i) => now.getFullYear() - i);
 
 function MonthlyReports() {
   const API_BASE = import.meta.env.VITE_API_URL;
+  // "monthly" reuses the existing month+year report; "yearly" is the same
+  // report/summary/table shape generated over a full calendar year instead
+  // — only the endpoint and period label differ below.
+  const [reportType, setReportType] = React.useState("monthly");
   const [month, setMonth] = React.useState(now.getMonth() + 1);
   const [year, setYear] = React.useState(now.getFullYear());
   const [report, setReport] = React.useState(null);
   const [generating, setGenerating] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
 
+  const isYearly = reportType === "yearly";
+  const periodLabel = isYearly ? String(year) : `${MONTHS[month - 1]} ${year}`;
+
   const generateReport = async () => {
     try {
       setGenerating(true);
       setReport(null);
 
-      const res = await axios.get(`${API_BASE}/admin/reports/monthly`, {
-        params: { month, year },
-        withCredentials: true,
-      });
+      const res = await axios.get(
+        `${API_BASE}/admin/reports/${isYearly ? "yearly" : "monthly"}`,
+        {
+          params: isYearly ? { year } : { month, year },
+          withCredentials: true,
+        },
+      );
 
       setReport(res.data);
-      toast.success(`Report generated for ${MONTHS[month - 1]} ${year}.`);
+      toast.success(`Report generated for ${periodLabel}.`);
     } catch (err) {
       console.error(err);
       toast.error(err?.response?.data?.message || "Unable to generate report.");
@@ -93,16 +103,22 @@ function MonthlyReports() {
     try {
       setDownloading(true);
 
-      const res = await axios.get(`${API_BASE}/admin/reports/monthly/pdf`, {
-        params: { month, year },
-        withCredentials: true,
-        responseType: "blob",
-      });
+      const res = await axios.get(
+        `${API_BASE}/admin/reports/${isYearly ? "yearly" : "monthly"}/pdf`,
+        {
+          params: isYearly ? { year } : { month, year },
+          withCredentials: true,
+          responseType: "blob",
+        },
+      );
 
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `Customer_Report_${MONTHS[month - 1]}_${year}.pdf`);
+      link.setAttribute(
+        "download",
+        isYearly ? `Customer_Report_${year}.pdf` : `Customer_Report_${MONTHS[month - 1]}_${year}.pdf`,
+      );
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -120,28 +136,42 @@ function MonthlyReports() {
   return (
     <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
       <div>
-        <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold">Monthly Reports</h1>
+        <h1 className="text-[clamp(1.5rem,1vw+1.1rem,1.875rem)] font-semibold">Reports</h1>
         <p className="text-muted-foreground mt-1">
-          Generate a monthly customer activity report and download it as a PDF.
+          Generate a monthly or yearly customer activity report and download it as a PDF.
         </p>
       </div>
 
       <div className="surface-card p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:flex-wrap">
           <div className="w-full sm:w-48">
-            <label className="text-sm font-medium leading-none">Month</label>
+            <label className="text-sm font-medium leading-none">Report type</label>
             <Select
               className="mt-1.5"
-              value={month}
-              onChange={(e) => setMonth(Number(e.target.value))}
+              value={reportType}
+              onChange={(e) => setReportType(e.target.value)}
             >
-              {MONTHS.map((label, index) => (
-                <option key={label} value={index + 1}>
-                  {label}
-                </option>
-              ))}
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
             </Select>
           </div>
+
+          {!isYearly && (
+            <div className="w-full sm:w-48">
+              <label className="text-sm font-medium leading-none">Month</label>
+              <Select
+                className="mt-1.5"
+                value={month}
+                onChange={(e) => setMonth(Number(e.target.value))}
+              >
+                {MONTHS.map((label, index) => (
+                  <option key={label} value={index + 1}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
 
           <div className="w-full sm:w-36">
             <label className="text-sm font-medium leading-none">Year</label>
@@ -178,7 +208,9 @@ function MonthlyReports() {
 
         {!report && !generating && (
           <p className="mt-4 text-sm text-muted-foreground">
-            Select a month and year, then click "Generate Report" to preview the data.
+            {isYearly
+              ? 'Select a year, then click "Generate Report" to preview the data.'
+              : 'Select a month and year, then click "Generate Report" to preview the data.'}
           </p>
         )}
       </div>
@@ -199,7 +231,7 @@ function MonthlyReports() {
                 <tr>
                   <Th>Customer ID</Th>
                   <Th>Child(ren)</Th>
-                  <Th>Parent</Th>
+                  <Th>Parent Name / Guardian Name</Th>
                   <Th>Mobile</Th>
                   <Th className="text-right">Visits</Th>
                   <Th className="text-right">Points</Th>
@@ -211,7 +243,7 @@ function MonthlyReports() {
                   <tr>
                     <td colSpan={7} className="text-center py-12 text-muted-foreground">
                       <UsersIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      No customer visits recorded for {report.monthName} {report.year}.
+                      No customer visits recorded for {periodLabel}.
                     </td>
                   </tr>
                 ) : (

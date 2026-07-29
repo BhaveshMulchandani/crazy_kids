@@ -1,6 +1,7 @@
 const Offer = require("../models/offer.model");
 const Session = require("../models/session.model");
 const { getWhatsappOfferQueue } = require("../queues/whatsappOffer.queue");
+const { getDisplayName } = require("../utils/customerDisplay");
 
 // One line of human-readable offer detail for the WhatsApp template's
 // {{3}} placeholder — falls back to a type-specific summary (mirrors how
@@ -34,11 +35,12 @@ const fetchEligibleCustomers = async () => {
       $group: {
         _id: "$mobileNumber",
         parentName: { $first: "$parentName" },
+        children: { $first: "$children" },
       },
     },
   ]);
 
-  return rows.map((row) => ({ mobileNumber: row._id, parentName: row.parentName }));
+  return rows.map((row) => ({ mobileNumber: row._id, parentName: getDisplayName(row) }));
 };
 
 // Creates one BullMQ job per eligible customer and returns immediately —

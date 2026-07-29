@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const membershipSchema = new mongoose.Schema({
   customer: {
-    parentName: { type: String, required: true, trim: true },
+    parentName: { type: String, default: "", trim: true },
     mobileNumber: { type: String, required: true, trim: true, index: true },
   },
   membershipPlan: { type: mongoose.Schema.Types.ObjectId, ref: "Offer", required: true },
@@ -18,7 +18,7 @@ const membershipSchema = new mongoose.Schema({
   benefits: [{ type: String, trim: true }],
   registeredChildren: [{
     name: { type: String, required: true, trim: true },
-    dob: { type: Date, required: true },
+    dob: { type: Date, default: null },
   }],
   status: { type: String, enum: ["active", "expired", "exhausted"], default: "active", index: true },
 }, { timestamps: true });

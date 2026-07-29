@@ -9,7 +9,9 @@ import {
   Plus,
   X,
   Baby,
+  UsersRound,
 } from "lucide-react";
+import { getDisplayName } from "../../utils/customerDisplay";
 
 // Mock data removed — Billing now uses backend session creation
 
@@ -48,9 +50,11 @@ const ageInYears = (dob) => {
 
 const calculateEstimatedSessionCharge = (children, pricingSettings) => {
   const subtotal = (children || []).reduce((total, child) => {
-    if (!child?.name?.trim() || !child?.dob) return total;
+    if (!child?.name?.trim()) return total;
 
-    const age = ageInYears(child.dob);
+    // No DOB on file — mirrors billing.service.js: an unknown age is billed
+    // at the standard (3+ years) rate rather than being skipped/free.
+    const age = child?.dob ? ageInYears(child.dob) : null;
     const isUnder3 = age !== null && age < 3;
     const firstHourRate = isUnder3
       ? Number(pricingSettings?.firstHourUnder3 ?? 0)
@@ -68,6 +72,26 @@ const calculateEstimatedSessionCharge = (children, pricingSettings) => {
 
   return {
     total: subtotal + socksTotal,
+    socksQty,
+    socksTotal,
+  };
+};
+
+// Mirrors billing.service.js's group-booking branch: priced purely from the
+// above/below-3 headcount (no per-child names/DOB collected for a group), at
+// the booking's starting 1 hour. Socks are a single group-wide headcount too
+// (not a per-child opt-in) — same existing socksCost rate as normal bookings.
+const calculateEstimatedGroupCharge = (group, pricingSettings) => {
+  const aboveCount = Number(group?.aboveThreeCount) || 0;
+  const belowCount = Number(group?.belowThreeCount) || 0;
+  const firstHourAbove3 = Number(pricingSettings?.firstHourAbove3 ?? 0);
+  const firstHourUnder3 = Number(pricingSettings?.firstHourUnder3 ?? 0);
+
+  const socksQty = Number(group?.socksRequired) || 0;
+  const socksTotal = socksQty * Number(pricingSettings?.socksCost ?? 0);
+
+  return {
+    total: aboveCount * firstHourAbove3 + belowCount * firstHourUnder3 + socksTotal,
     socksQty,
     socksTotal,
   };
@@ -182,6 +206,12 @@ function BillingPage() {
   ]);
   const [amountPaid, setAmountPaid] = useState("");
   const [errors, setErrors] = useState({});
+  const [isGroupBooking, setIsGroupBooking] = useState(false);
+  const [groupRepresentativeChildName, setGroupRepresentativeChildName] = useState("");
+  const [groupTotalChildren, setGroupTotalChildren] = useState("");
+  const [groupAboveThreeCount, setGroupAboveThreeCount] = useState("");
+  const [groupBelowThreeCount, setGroupBelowThreeCount] = useState("");
+  const [groupSocksRequired, setGroupSocksRequired] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -315,9 +345,8 @@ function BillingPage() {
   const validateForm = () => {
     const nextErrors = {};
 
-    if (!parentName.trim()) {
-      nextErrors.parentName = "Parent name is required";
-    }
+    // Parent/Guardian Name is optional — the customer falls back to their
+    // first child's name wherever it would otherwise be displayed.
 
     if (!mobile.trim()) {
       nextErrors.mobile = "Mobile number is required";
@@ -329,36 +358,72 @@ function BillingPage() {
       nextErrors.area = "Area is required";
     }
 
-    if (!city.trim()) {
-      nextErrors.city = "City is required";
-    }
+    // City is optional.
 
-    const validChildren = children.filter((child) => child.name.trim() && child.dob);
-    if (validChildren.length < 1) {
-      nextErrors.children = "Add at least one child with name and DOB";
+    if (isGroupBooking) {
+      if (!parentName.trim() && !groupRepresentativeChildName.trim()) {
+        nextErrors.groupRepresentativeChildName =
+          "Parent/Guardian Name or Representative Child Name is required";
+      }
+
+      const total = Number(groupTotalChildren);
+      const above = Number(groupAboveThreeCount);
+      const below = Number(groupBelowThreeCount);
+
+      if (!groupTotalChildren || !Number.isInteger(total) || total < 1) {
+        nextErrors.groupTotalChildren = "Enter the total number of children";
+      }
+      if (groupAboveThreeCount === "" || !Number.isInteger(above) || above < 0) {
+        nextErrors.groupAboveThreeCount = "Enter children above 3 years";
+      }
+      if (groupBelowThreeCount === "" || !Number.isInteger(below) || below < 0) {
+        nextErrors.groupBelowThreeCount = "Enter children below 3 years";
+      }
+      if (
+        !nextErrors.groupTotalChildren &&
+        !nextErrors.groupAboveThreeCount &&
+        !nextErrors.groupBelowThreeCount &&
+        above + below !== total
+      ) {
+        nextErrors.groupAboveThreeCount = "Above 3 + Below 3 must equal the total number of children";
+      }
+
+      // Socks Required is optional (defaults to 0 — a group doesn't have to
+      // need socks at all), but if entered it must be a valid, non-negative
+      // count that doesn't exceed the group's total headcount.
+      if (groupSocksRequired !== "") {
+        const socks = Number(groupSocksRequired);
+        if (!Number.isInteger(socks) || socks < 0) {
+          nextErrors.groupSocksRequired = "Socks required must be a whole number and cannot be negative";
+        } else if (!nextErrors.groupTotalChildren && socks > total) {
+          nextErrors.groupSocksRequired = "Socks required cannot be greater than the total number of children";
+        }
+      }
     } else {
-      children.forEach((child, index) => {
-        if (!child.name.trim()) {
-          nextErrors[`child-${index}-name`] = "Child name is required";
-        }
-        if (!child.dob) {
-          nextErrors[`child-${index}-dob`] = "Child DOB is required";
-        }
-      });
-    }
+      const validChildren = children.filter((child) => child.name.trim());
+      if (validChildren.length < 1) {
+        nextErrors.children = "Add at least one child with a name";
+      } else {
+        children.forEach((child, index) => {
+          if (!child.name.trim()) {
+            nextErrors[`child-${index}-name`] = "Child name is required";
+          }
+        });
+      }
 
-    const selectedMembershipPlan = membershipPlanId === "none"
-      ? null
-      : offers.find((offer) => offer.id === membershipPlanId);
-    const membershipForValidation = membership || selectedMembershipPlan;
-    if (membershipForValidation && validChildren.length) {
-      const childKey = (child) => `${child.name.trim().toLowerCase()}|${new Date(child.dob).toISOString().slice(0, 10)}`;
-      const registeredChildren = membership?.registeredChildren || [];
-      const registeredKeys = new Set(registeredChildren.map(childKey));
-      const newChildren = new Set(validChildren.map(childKey).filter((key) => !registeredKeys.has(key)));
-      const kidsAllowed = Number(membershipForValidation.kidsAllowed ?? membershipForValidation.rules?.kidsAllowed ?? 0);
-      if (registeredChildren.length + newChildren.size > kidsAllowed) {
-        nextErrors.children = "Membership child limit reached.";
+      const selectedMembershipPlan = membershipPlanId === "none"
+        ? null
+        : offers.find((offer) => offer.id === membershipPlanId);
+      const membershipForValidation = membership || selectedMembershipPlan;
+      if (membershipForValidation && validChildren.length) {
+        const childKey = (child) => `${child.name.trim().toLowerCase()}|${child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "no-dob"}`;
+        const registeredChildren = membership?.registeredChildren || [];
+        const registeredKeys = new Set(registeredChildren.map(childKey));
+        const newChildren = new Set(validChildren.map(childKey).filter((key) => !registeredKeys.has(key)));
+        const kidsAllowed = Number(membershipForValidation.kidsAllowed ?? membershipForValidation.rules?.kidsAllowed ?? 0);
+        if (registeredChildren.length + newChildren.size > kidsAllowed) {
+          nextErrors.children = "Membership child limit reached.";
+        }
       }
     }
 
@@ -393,45 +458,28 @@ function BillingPage() {
     setSubmitting(true);
 
     try {
-      const validChildrenPayload = validChildren
-        .filter((c) => c.name.trim() && c.dob)
-        .map((c) => ({
-          name: c.name.trim(),
-          dob: c.dob,
-          gender: c.gender || "not_specified",
-          socksOpted: Boolean(c.socksOpted),
-        }));
-
-      const sessionCharge = calculateEstimatedSessionCharge(
-        validChildrenPayload,
-        pricingSettings,
-      );
+      // `estimatedCharge` already branches on isGroupBooking (group headcount
+      // vs. per-child pricing) — reused here so paidAmount/balance always
+      // match whatever the operator saw on screen before submitting.
       const paidAmount =
         paymentStatus === "paid"
-          ? Number(amountPaid) || sessionCharge.total
+          ? Number(amountPaid) || estimatedCharge.total
           : paymentStatus === "partially_paid"
             ? paymentBreakdown.reduce(
                 (sum, entry) => sum + (Number(entry.amount) || 0),
                 0,
               )
             : 0;
-      const balanceAmount = Math.max(sessionCharge.total - paidAmount, 0);
+      const balanceAmount = Math.max(estimatedCharge.total - paidAmount, 0);
 
-      const payload = {
+      const sharedPayload = {
         parentName,
         mobileNumber: mobile,
         area,
         city,
         bandNumber,
 
-        children: validChildrenPayload,
-
-        offer: offerId === "none" ? null : offerId,
-        purchaseMembershipPlan: membershipPlanId === "none" ? null : membershipPlanId,
-
         reference,
-
-        socksRequired: validChildrenPayload.some((c) => c.socksOpted),
 
         notes,
         paymentStatus,
@@ -450,6 +498,38 @@ function BillingPage() {
         amountPaid: paidAmount,
         balanceAmount,
       };
+
+      const payload = isGroupBooking
+        ? {
+            ...sharedPayload,
+            isGroupBooking: true,
+            groupBooking: {
+              representativeChildName: groupRepresentativeChildName.trim(),
+              totalChildren: Number(groupTotalChildren),
+              aboveThreeCount: Number(groupAboveThreeCount),
+              belowThreeCount: Number(groupBelowThreeCount),
+              socksRequired: groupSocksRequired === "" ? 0 : Number(groupSocksRequired),
+            },
+            // Memberships aren't tracked per-child for a group booking —
+            // see backend/controllers/session.controller.js.
+            offer: offerId === "none" ? null : offerId,
+            purchaseMembershipPlan: null,
+            socksRequired: (groupSocksRequired === "" ? 0 : Number(groupSocksRequired)) > 0,
+          }
+        : {
+            ...sharedPayload,
+            children: validChildren
+              .filter((c) => c.name.trim())
+              .map((c) => ({
+                name: c.name.trim(),
+                dob: c.dob || null,
+                gender: c.gender || "not_specified",
+                socksOpted: Boolean(c.socksOpted),
+              })),
+            offer: offerId === "none" ? null : offerId,
+            purchaseMembershipPlan: membershipPlanId === "none" ? null : membershipPlanId,
+            socksRequired: validChildren.some((c) => c.socksOpted),
+          };
 
       const resp = await axios.post(`${API_BASE}/session/create`, payload, {
         withCredentials: true,
@@ -485,24 +565,25 @@ function BillingPage() {
     setPaymentBreakdown([{ method: "cash", amount: "" }]);
     setAmountPaid("");
     setErrors({});
+    setIsGroupBooking(false);
+    setGroupRepresentativeChildName("");
+    setGroupTotalChildren("");
+    setGroupAboveThreeCount("");
+    setGroupBelowThreeCount("");
+    setGroupSocksRequired("");
   };
 
-  // Only clears the search box/results and the "matched customer" indicator
-  // — unlike reset(), it must NOT wipe parentName/mobile/city/children etc,
-  // since those may have already been filled in (via a search match or by
-  // hand) and the operator is just dismissing the search UI, not starting
-  // the whole form over.
-  const clearSearch = () => {
-    setLookup("");
-    setSearchResults([]);
-    setCustomer(null);
-  };
-
-  const validChildren = children.filter((c) => c.name.trim() && c.dob);
-  const estimatedCharge = calculateEstimatedSessionCharge(
-    validChildren,
-    pricingSettings,
-  );
+  const validChildren = children.filter((c) => c.name.trim());
+  const estimatedCharge = isGroupBooking
+    ? calculateEstimatedGroupCharge(
+        {
+          aboveThreeCount: groupAboveThreeCount,
+          belowThreeCount: groupBelowThreeCount,
+          socksRequired: groupSocksRequired,
+        },
+        pricingSettings,
+      )
+    : calculateEstimatedSessionCharge(validChildren, pricingSettings);
 
   return (
     <div className="w-full max-w-[1920px] mx-auto space-y-6 px-6 py-8">
@@ -524,7 +605,7 @@ function BillingPage() {
               className="pl-9 h-11"
               value={lookup}
               onChange={(e) => setLookup(e.target.value)}
-              placeholder="Mobile, Customer ID or Parent Name"
+              placeholder="Mobile, Customer ID, Parent Name / Guardian Name, or Child Name"
               onKeyDown={(e) => e.key === "Enter" && findCustomer()}
             />
             {searchResults.length > 0 && (
@@ -538,7 +619,7 @@ function BillingPage() {
                   >
                     <span className="min-w-0">
                       <span className="block text-sm font-medium text-foreground truncate">
-                        {result.parentName}
+                        {getDisplayName(result)}
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         {result.mobileNumber}
@@ -559,7 +640,7 @@ function BillingPage() {
             <Search className="h-4 w-4 mr-2" /> Find
           </Button>
           {customer && (
-            <Button variant="outline" onClick={clearSearch} className="h-11">
+            <Button variant="outline" onClick={reset} className="h-11">
               <X className="h-4 w-4 mr-1" /> Clear
             </Button>
           )}
@@ -591,7 +672,7 @@ function BillingPage() {
         <div className="col-span-2 surface-card p-8 space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             <div className="space-y-2 min-w-0">
-              <Label>Parent Name *</Label>
+              <Label>Parent Name / Guardian Name</Label>
               <Input
                 value={parentName}
                 onChange={(e) => {
@@ -646,7 +727,7 @@ function BillingPage() {
               {errors.area && <p className="text-xs text-red-500">{errors.area}</p>}
             </div>
             <div className="space-y-2 min-w-0">
-              <Label>City *</Label>
+              <Label>City</Label>
               <Input
                 name="city"
                 autoComplete="address-level2"
@@ -662,6 +743,119 @@ function BillingPage() {
             </div>
           </div>
 
+          <div className="flex items-center justify-between rounded-xl border bg-secondary/30 p-3">
+            <div>
+              <Label className="flex items-center gap-1.5">
+                <UsersRound className="h-3.5 w-3.5" /> Group Booking
+              </Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Large group (10-20+ kids)? Skip per-child entry and book by headcount instead.
+              </p>
+            </div>
+            <Switch
+              checked={isGroupBooking}
+              onCheckedChange={(checked) => {
+                setIsGroupBooking(checked);
+                setErrors({});
+              }}
+            />
+          </div>
+
+          {isGroupBooking ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="space-y-2 min-w-0">
+                  <Label>Representative Child Name{parentName.trim() ? " (optional)" : " *"}</Label>
+                  <Input
+                    value={groupRepresentativeChildName}
+                    onChange={(e) => {
+                      setGroupRepresentativeChildName(e.target.value);
+                      setErrors((prev) => ({ ...prev, groupRepresentativeChildName: "" }));
+                    }}
+                    className={errors.groupRepresentativeChildName ? "border-red-500" : ""}
+                    placeholder="Used if no Parent/Guardian Name is given"
+                  />
+                  {errors.groupRepresentativeChildName && (
+                    <p className="text-xs text-red-500">{errors.groupRepresentativeChildName}</p>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                <div className="space-y-2 min-w-0">
+                  <Label>Total Number of Children *</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={groupTotalChildren}
+                    onChange={(e) => {
+                      setGroupTotalChildren(e.target.value);
+                      setErrors((prev) => ({ ...prev, groupTotalChildren: "" }));
+                    }}
+                    className={errors.groupTotalChildren ? "border-red-500" : ""}
+                    placeholder="15"
+                  />
+                  {errors.groupTotalChildren && <p className="text-xs text-red-500">{errors.groupTotalChildren}</p>}
+                </div>
+                <div className="space-y-2 min-w-0">
+                  <Label>Children Above 3 Years *</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={groupAboveThreeCount}
+                    onChange={(e) => {
+                      setGroupAboveThreeCount(e.target.value);
+                      setErrors((prev) => ({ ...prev, groupAboveThreeCount: "" }));
+                    }}
+                    className={errors.groupAboveThreeCount ? "border-red-500" : ""}
+                    placeholder="8"
+                  />
+                  {errors.groupAboveThreeCount && <p className="text-xs text-red-500">{errors.groupAboveThreeCount}</p>}
+                </div>
+                <div className="space-y-2 min-w-0">
+                  <Label>Children Below 3 Years *</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={groupBelowThreeCount}
+                    onChange={(e) => {
+                      setGroupBelowThreeCount(e.target.value);
+                      setErrors((prev) => ({ ...prev, groupBelowThreeCount: "" }));
+                    }}
+                    className={errors.groupBelowThreeCount ? "border-red-500" : ""}
+                    placeholder="7"
+                  />
+                  {errors.groupBelowThreeCount && <p className="text-xs text-red-500">{errors.groupBelowThreeCount}</p>}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                <div className="space-y-2 min-w-0">
+                  <Label>Socks Required (optional)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max={groupTotalChildren || undefined}
+                    value={groupSocksRequired}
+                    onChange={(e) => {
+                      setGroupSocksRequired(e.target.value);
+                      setErrors((prev) => ({ ...prev, groupSocksRequired: "" }));
+                    }}
+                    className={errors.groupSocksRequired ? "border-red-500" : ""}
+                    placeholder="12"
+                  />
+                  {errors.groupSocksRequired && <p className="text-xs text-red-500">{errors.groupSocksRequired}</p>}
+                </div>
+                {Number(groupSocksRequired) > 0 && (
+                  <div className="space-y-2 min-w-0 sm:col-span-2">
+                    <Label>Socks Total</Label>
+                    <div className="flex h-9 items-center rounded-md border border-input bg-secondary/30 px-3 text-sm text-muted-foreground">
+                      {groupSocksRequired} × ₹{Number(pricingSettings?.socksCost ?? 0)} = ₹
+                      {(Number(groupSocksRequired) * Number(pricingSettings?.socksCost ?? 0)).toLocaleString()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
           <div>
             <div className="flex items-center justify-between mb-3">
               <Label className="flex items-center gap-1.5">
@@ -761,6 +955,7 @@ function BillingPage() {
               })}
             </div>
           </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div className="space-y-2 min-w-0">
@@ -784,8 +979,8 @@ function BillingPage() {
               </select>
             </div>
             <div className="space-y-2 min-w-0">
-              <Label>Purchase membership (optional)</Label>
-              <select className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm" value={membershipPlanId} disabled={!!membership} onChange={(e) => setMembershipPlanId(e.target.value)}>
+              <Label>Purchase membership{isGroupBooking ? " (unavailable for group bookings)" : " (optional)"}</Label>
+              <select className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm" value={isGroupBooking ? "none" : membershipPlanId} disabled={isGroupBooking || !!membership} onChange={(e) => setMembershipPlanId(e.target.value)}>
                 <option value="none">{membership ? "Customer already has an active membership" : "No membership"}</option>
                 {offers.filter((offer) => offer.type === "membership").map((offer) => <option key={offer.id} value={offer.id}>{offer.name} · ₹{offer.value}</option>)}
               </select>

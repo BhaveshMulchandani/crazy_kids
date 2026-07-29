@@ -38,12 +38,12 @@ const childSchema = new mongoose.Schema(
 
     dob: {
       type: Date,
-      required: true,
+      default: null,
     },
 
     age: {
       type: Number,
-      required: true,
+      default: null,
       min: 0,
     },
 
@@ -89,9 +89,12 @@ const sessionSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Optional — a customer without a Parent/Guardian Name on file falls
+    // back to their first child's name everywhere the app displays or
+    // searches by name (see backend/utils/customerDisplay.js).
     parentName: {
       type: String,
-      required: true,
+      default: "",
       trim: true,
       index: true,
     },
@@ -111,7 +114,7 @@ const sessionSchema = new mongoose.Schema(
 
     city: {
       type: String,
-      required: true,
+      default: "",
       trim: true,
     },
 
@@ -128,6 +131,24 @@ const sessionSchema = new mongoose.Schema(
         validator: (children) => children.length > 0,
         message: "At least one child is required",
       },
+    },
+
+    // A large-group booking (10-20+ kids) skips per-child name/DOB entry —
+    // `children` above still holds exactly one placeholder entry (see
+    // createsession) so the schema's "at least one child" rule and the
+    // existing display-name fallback (customerDisplay.js) keep working
+    // unchanged. Billing branches on `groupBooking.isGroup` to price by
+    // headcount instead of iterating individual children.
+    groupBooking: {
+      isGroup: { type: Boolean, default: false },
+      representativeChildName: { type: String, default: "", trim: true },
+      totalChildren: { type: Number, default: 0, min: 0 },
+      aboveThreeCount: { type: Number, default: 0, min: 0 },
+      belowThreeCount: { type: Number, default: 0, min: 0 },
+      // How many socks are needed for the whole group — a headcount, not the
+      // per-child socksOpted flag used elsewhere, since a group booking has
+      // no per-child entries to opt in individually.
+      socksRequired: { type: Number, default: 0, min: 0 },
     },
 
     offer: {

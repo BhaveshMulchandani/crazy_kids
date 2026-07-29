@@ -44,8 +44,17 @@ const { createMembership, refreshStatus } = require('./membership.controller');
 const { calculateInvoiceCharges } = require('../services/billing.service');
 const Notification = require('../models/notification.model');
 const { getNextFormattedNumber } = require('../services/counter.service');
+const { buildCustomerNameOr } = require('../utils/customerSearch');
+const { getDisplayName } = require('../utils/customerDisplay');
 
-const membershipChildKey = (child) => `${String(child.name || "").trim().toLowerCase()}|${new Date(child.dob).toISOString().slice(0, 10)}`;
+// dob is optional, so two same-named children without a DOB on file are
+// treated as the same child (falls back to name-only matching) rather than
+// crashing on `new Date(undefined).toISOString()`.
+const membershipChildKey = (child) => {
+  const name = String(child.name || "").trim().toLowerCase();
+  const dobKey = child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "no-dob";
+  return `${name}|${dobKey}`;
+};
 
 const createsession = async (
   req,
@@ -68,16 +77,15 @@ const createsession = async (
       paymentBreakdown,
       amountPaid,
       purchaseMembershipPlan,
+      isGroupBooking,
+      groupBooking,
     } = req.body;
 
     // Validations
 
-    if (!parentName?.trim()) {
-      return res.status(400).json({
-        message:
-          "Parent name is required",
-      });
-    }
+    // Parent/Guardian Name is optional — when absent, the customer is
+    // identified and displayed by their first child's name everywhere
+    // (see backend/utils/customerDisplay.js).
 
     if (!mobileNumber?.trim()) {
       return res.status(400).json({
@@ -100,49 +108,114 @@ const createsession = async (
       });
     }
 
-    if (!city?.trim()) {
-      return res.status(400).json({
-        message:
-          "City is required",
-      });
-    }
-
-    if (
-      !children ||
-      !Array.isArray(children) ||
-      children.length === 0
-    ) {
-      return res.status(400).json({
-        message:
-          "At least one child is required",
-      });
-    }
+    // City is optional.
 
     const GENDER_VALUES = ["boy", "girl", "not_specified"];
+    let processedChildren;
+    let groupBookingData = { isGroup: false };
 
-    const processedChildren =
-      children.map((child) => {
-        if (
-          !child.name ||
-          !child.dob
-        ) {
-          throw new Error(
-            "Each child must have name and DOB"
-          );
-        }
+    if (isGroupBooking) {
+      // Large-group bookings (10-20+ kids) skip per-child name/DOB entry —
+      // only a headcount split by age threshold is collected, matching the
+      // age-bracket pricing already used per-child elsewhere.
+      const representativeChildName = String(groupBooking?.representativeChildName || "").trim();
+      const totalChildren = Number(groupBooking?.totalChildren);
+      const aboveThreeCount = Number(groupBooking?.aboveThreeCount);
+      const belowThreeCount = Number(groupBooking?.belowThreeCount);
+      // Defaults to 0 (not required) — a group booking doesn't have to need
+      // socks at all.
+      const socksRequired = groupBooking?.socksRequired === undefined || groupBooking?.socksRequired === ""
+        ? 0
+        : Number(groupBooking.socksRequired);
 
-        return {
-          name: child.name.trim(),
-          dob: child.dob,
-          age: calculateAge(
-            child.dob
-          ),
-          gender: GENDER_VALUES.includes(child.gender)
-            ? child.gender
-            : "not_specified",
-          socksOpted: Boolean(child.socksOpted),
-        };
-      });
+      if (!parentName?.trim() && !representativeChildName) {
+        return res.status(400).json({
+          message: "Parent/Guardian Name or Representative Child Name is required for a group booking",
+        });
+      }
+
+      if (
+        !Number.isInteger(totalChildren) || totalChildren < 1 ||
+        !Number.isInteger(aboveThreeCount) || aboveThreeCount < 0 ||
+        !Number.isInteger(belowThreeCount) || belowThreeCount < 0
+      ) {
+        return res.status(400).json({
+          message: "Total children, children above 3 years, and children below 3 years must be provided as whole numbers",
+        });
+      }
+
+      if (aboveThreeCount + belowThreeCount !== totalChildren) {
+        return res.status(400).json({
+          message: "Children above 3 years plus children below 3 years must equal the total number of children",
+        });
+      }
+
+      if (!Number.isInteger(socksRequired) || socksRequired < 0) {
+        return res.status(400).json({
+          message: "Socks required must be a whole number and cannot be negative",
+        });
+      }
+
+      if (socksRequired > totalChildren) {
+        return res.status(400).json({
+          message: "Socks required cannot be greater than the total number of children",
+        });
+      }
+
+      groupBookingData = {
+        isGroup: true,
+        representativeChildName,
+        totalChildren,
+        aboveThreeCount,
+        belowThreeCount,
+        socksRequired,
+      };
+
+      // A single placeholder "child" so the schema's "at least one child"
+      // rule and the existing display-name fallback (customerDisplay.js —
+      // parentName, else children[0].name) keep working unchanged. Never
+      // shown/used for per-child pricing — billing.service.js prices group
+      // bookings from `groupBookingData` above instead of this array.
+      processedChildren = [{
+        name: representativeChildName || parentName.trim(),
+        dob: null,
+        age: null,
+        gender: "not_specified",
+        socksOpted: false,
+      }];
+    } else {
+      if (
+        !children ||
+        !Array.isArray(children) ||
+        children.length === 0
+      ) {
+        return res.status(400).json({
+          message:
+            "At least one child is required",
+        });
+      }
+
+      processedChildren =
+        children.map((child) => {
+          if (!child.name?.trim()) {
+            throw new Error(
+              "Each child must have a name"
+            );
+          }
+
+          return {
+            name: child.name.trim(),
+            dob: child.dob || null,
+            age: child.dob ? calculateAge(
+              child.dob
+            ) : null,
+            gender: GENDER_VALUES.includes(child.gender)
+              ? child.gender
+              : "not_specified",
+            socksOpted: Boolean(child.socksOpted),
+          };
+        });
+    }
 
     // countDocuments()+1 is not concurrency-safe — two bookings arriving
     // close together can both read the same count before either insert
@@ -156,16 +229,41 @@ const createsession = async (
       padLength: 5,
     });
 
+    // Every booking starts at this many hours (see `totalHours: 1` below) —
+    // a membership must be able to cover at least this much before it's
+    // allowed to attach to the new session at all.
+    const BOOKING_HOURS = 1;
+
+    // Group bookings don't collect individual child names, so there's no
+    // sane way to check them against a membership's named registeredChildren
+    // list or its kidsAllowed cap — memberships/offers-as-membership simply
+    // don't apply to a group booking, which is always priced at the normal
+    // headcount rate.
     let purchasedMembership = null;
-    if (purchaseMembershipPlan) {
+    if (purchaseMembershipPlan && !groupBookingData.isGroup) {
       purchasedMembership = await createMembership({ parentName, mobileNumber, planId: purchaseMembershipPlan });
     }
-    const activeMembership = purchasedMembership || await Membership.findOne({ "customer.mobileNumber": mobileNumber.trim(), status: "active", expiryDate: { $gt: new Date() }, remainingPlayHours: { $gt: 0 } }).sort({ expiryDate: 1 });
+    const activeMembership = groupBookingData.isGroup
+      ? null
+      : purchasedMembership || await Membership.findOne({ "customer.mobileNumber": mobileNumber.trim(), status: "active", expiryDate: { $gt: new Date() }, remainingPlayHours: { $gt: 0 } }).sort({ expiryDate: 1 });
     if (activeMembership) {
       refreshStatus(activeMembership);
       await activeMembership.save();
     }
-    if (activeMembership?.status === "active") {
+    // Never attach a membership that can't cover the booking's starting
+    // duration — it would otherwise get linked to the session and then
+    // silently fail to apply at checkout (billing.service.js only applies a
+    // membership when remainingPlayHours >= totalHours), so the operator
+    // never learns why the "membership" session was charged full price.
+    // Falls back to a normal, non-membership booking instead of blocking it
+    // outright — the operator has no explicit "skip membership" toggle, so
+    // refusing the booking entirely for an exhausted membership would leave
+    // no way to book this customer at all.
+    const membershipHasSufficientHours =
+      activeMembership?.status === "active" &&
+      Number(activeMembership.remainingPlayHours || 0) >= BOOKING_HOURS;
+
+    if (membershipHasSufficientHours) {
       const registeredChildren = activeMembership.registeredChildren || [];
       const registeredKeys = new Set(registeredChildren.map(membershipChildKey));
       const newChildren = processedChildren.filter((child) => !registeredKeys.has(membershipChildKey(child)));
@@ -182,7 +280,7 @@ const createsession = async (
         sessionNumber,
 
         parentName:
-          parentName.trim(),
+          parentName?.trim() || "",
 
         mobileNumber:
           mobileNumber.trim(),
@@ -191,7 +289,7 @@ const createsession = async (
           area.trim(),
 
         city:
-          city.trim(),
+          city?.trim() || "",
 
         bandNumber:
           bandNumber?.trim() || "",
@@ -199,9 +297,12 @@ const createsession = async (
         children:
           processedChildren,
 
+        groupBooking:
+          groupBookingData,
+
         offer:
           purchaseMembershipPlan ? null : offer || null,
-        membership: activeMembership?.status === "active" ? activeMembership._id : null,
+        membership: membershipHasSufficientHours ? activeMembership._id : null,
         membershipPurchase: purchasedMembership ? { membership: purchasedMembership._id, planName: purchasedMembership.planName, price: purchasedMembership.purchasePrice } : undefined,
 
         reference:
@@ -571,6 +672,26 @@ const extendsession = async (req, res) => {
       });
     }
 
+    // A membership-linked session must never be extended past the hours the
+    // customer actually has left — remainingPlayHours only gets decremented
+    // once, at checkout (see completesession below), so it still reflects
+    // the customer's true balance for the whole lifetime of this running
+    // session and is exactly what the requested new total must be checked
+    // against.
+    if (session.membership) {
+      const membership = await Membership.findById(session.membership);
+      if (membership) {
+        refreshStatus(membership);
+        const remainingHours = Number(membership.remainingPlayHours || 0);
+        const requestedTotalHours = session.totalHours + 1;
+        if (remainingHours < requestedTotalHours) {
+          return res.status(400).json({
+            message: `Only ${remainingHours} membership hour${remainingHours === 1 ? "" : "s"} ${remainingHours === 1 ? "is" : "are"} remaining. You cannot extend this session beyond your available membership balance. Please purchase a new membership or continue as a normal customer.`,
+          });
+        }
+      }
+    }
+
     session.extendedHours += 1;
     session.totalHours += 1;
 
@@ -616,7 +737,7 @@ const extendsession = async (req, res) => {
 const completesession = async (req, res) => {
   try {
     const { id } = req.params;
-    const { extraDiscount } = req.body || {};
+    const { extraDiscount, extraDiscountType, extraDiscountValue } = req.body || {};
 
     const session = await sessionmodel.findById(id);
 
@@ -644,7 +765,7 @@ const completesession = async (req, res) => {
     if (!existingInvoice) {
       const settings = await PriceSetting.findOne();
       const kots = await KOT.find({ session: id }).sort({ createdAt: -1 });
-      const calculation = await calculateInvoiceCharges({ session, settings, kots, extraDiscount });
+      const calculation = await calculateInvoiceCharges({ session, settings, kots, extraDiscount, extraDiscountType, extraDiscountValue });
       let hoursBeforeSession = 0;
       if (calculation.membershipApplied) {
         hoursBeforeSession = Number(calculation.membership.remainingPlayHours);
@@ -656,7 +777,11 @@ const completesession = async (req, res) => {
       const startTime = session.startTime ? new Date(session.startTime) : null;
       const actualDurationMinutes = startTime ? Math.max(0, Math.round((session.actualEndTime - startTime) / 60000)) : 0;
       const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
-      const loyaltyPoints = Math.floor(calculation.grandTotal / 100) * pointsPer100;
+      // No loyalty points at all on a session where any child's birthday
+      // falls on the session date — the whole bill is exempt, not just that
+      // child's share.
+      const hasBirthdayChild = (session.children || []).some((child) => isBirthdayToday(child.dob));
+      const loyaltyPoints = hasBirthdayChild ? 0 : Math.floor(calculation.grandTotal / 100) * pointsPer100;
       // Date.now() collides if two sessions complete within the same
       // millisecond, crashing checkout on the unique invoiceNumber index.
       // Shares the same atomic "invoiceNumber" sequence as
@@ -671,11 +796,16 @@ const completesession = async (req, res) => {
       });
       try {
         await Invoice.create({ invoiceNumber, session: session._id,
-          customer: { parentName: session.parentName, mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber, area: session.area || "", city: session.city || "" },
+          // getDisplayName falls back to session.children[0].name (the real
+          // representative/placeholder child) whenever parentName is blank
+          // — a group booking without a Parent/Guardian Name must never
+          // leave the invoice's customer name empty (see customerDisplay.js).
+          customer: { parentName: getDisplayName({ parentName: session.parentName, children: session.children }), mobileNumber: session.mobileNumber, bandNumber: session.bandNumber, sessionNumber: session.sessionNumber, area: session.area || "", city: session.city || "" },
           children: calculation.childCharges,
+          groupBooking: calculation.groupBooking || undefined,
           sessionDetails: { startTime: session.startTime, endTime: session.actualEndTime, actualDurationMinutes, totalHours: calculation.totalHours, extensionHours: calculation.extensionHours, pauseTimeMinutes: session.totalPausedMinutes || 0 },
           cafeItems: calculation.cafeItems,
-          charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, extraDiscountAmount: calculation.extraDiscountAmount, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0), socksQty: calculation.socksQty, socksRate: calculation.socksRate, socksTotal: calculation.socksTotal },
+          charges: { sessionTotal: calculation.sessionTotal, cafeSubtotal: calculation.cafeSubtotal, cafeGST: calculation.cafeGST, cafeTotal: calculation.cafeTotal, grandTotal: calculation.grandTotal, loyaltyPoints, normalSessionTotal: calculation.normalSessionTotal, discountAmount: calculation.discountAmount, extraDiscountAmount: calculation.extraDiscountAmount, extraDiscountType: calculation.extraDiscountType, extraDiscountValue: calculation.extraDiscountValue, membershipPurchaseTotal: Number(calculation.membershipPurchase?.price || 0), socksQty: calculation.socksQty, socksRate: calculation.socksRate, socksTotal: calculation.socksTotal },
           offer: { name: calculation.offer?.name || "", type: calculation.offer?.type || "", discountAmount: calculation.discountAmount, specialPricingApplied: calculation.specialPricingApplied },
           membership: { applied: calculation.membershipApplied, membership: calculation.membership?._id || null, planName: calculation.membership?.planName || "", hoursConsumed: calculation.membershipApplied ? calculation.totalHours : 0, hoursBeforeSession: calculation.membershipApplied ? hoursBeforeSession : 0, remainingHours: calculation.membershipApplied ? calculation.membership.remainingPlayHours : 0, expiryDate: calculation.membershipApplied ? calculation.membership.expiryDate : null, purchase: { planName: calculation.membershipPurchase?.planName || "", price: Number(calculation.membershipPurchase?.price || 0) } },
           payment: { status: session.paymentStatus || "pending", breakdown: session.paymentBreakdown || [], amountPaid: Number(session.amountPaid || 0), pendingAmount: Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0) },
@@ -815,22 +945,20 @@ const searchBillingCustomer = async (req, res) => {
       });
     }
 
-    const escapedQuery = q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const trimmedQuery = q.trim();
     const matches = await sessionmodel
       .find({
         status: {
           $in: ["completed"],
         },
         $or: [
+          ...buildCustomerNameOr(trimmedQuery, { exact: true }),
           {
-            parentName: {
-              $regex: `^${escapedQuery}$`,
-              $options: "i",
-            },
+            mobileNumber: trimmedQuery,
           },
           {
-            mobileNumber: q.trim(),
-          }
+            sessionNumber: trimmedQuery,
+          },
         ],
       })
       .select("_id sessionNumber parentName mobileNumber area city bandNumber children reference notes createdAt")

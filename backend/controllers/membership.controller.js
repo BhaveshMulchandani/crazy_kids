@@ -41,7 +41,7 @@ const createMembership = async ({ parentName, mobileNumber, planId }) => {
   const expiryDate = new Date(purchaseDate);
   expiryDate.setMonth(expiryDate.getMonth() + validityMonths);
   return Membership.create({
-    customer: { parentName: parentName.trim(), mobileNumber: mobileNumber.trim() },
+    customer: { parentName: (parentName || "").trim(), mobileNumber: mobileNumber.trim() },
     membershipPlan: plan._id,
     planName: plan.name,
     purchasePrice: Number(plan.value || 0),

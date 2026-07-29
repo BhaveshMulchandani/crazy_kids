@@ -91,7 +91,9 @@ const runBirthdayCampaign = async () => {
       console.log(`[birthday-service] Sending birthday message to ${child.mobileNumber} (${child.childName})...`);
       await whatsappService.sendBirthday({
         destination: child.mobileNumber,
-        userName: child.parentName,
+        // Parent/Guardian Name is optional — fall back to the birthday
+        // child's own name so the WhatsApp message is never sent blank.
+        userName: child.parentName || child.childName,
         childName: child.childName,
       });
       console.log(`[birthday-service] Success: ${child.mobileNumber} (${child.childName})`);

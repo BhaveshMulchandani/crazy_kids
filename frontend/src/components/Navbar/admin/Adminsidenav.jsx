@@ -16,7 +16,7 @@ const navItems = [
   { label: "Customers", icon: Users, path: "/admin/customers" },
   { label: "Offers", icon: Tag, path: "/admin/offers" },
   { label: "WhatsApp", icon: MessageCircle, path: "/admin/whatsapp" },
-  { label: "Monthly Reports", icon: FileBarChart, path: "/admin/reports" },
+  { label: "Reports", icon: FileBarChart, path: "/admin/reports" },
   { label: "Settings", icon: Settings, path: "/admin/settings" },
 ];
 

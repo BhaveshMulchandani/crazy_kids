@@ -117,11 +117,17 @@ const dashboardStats = async (req, res) => {
               { $sort: { qty: -1 } },
               { $limit: 6 },
             ],
+            revenueByArea: [
+              { $group: { _id: { $ifNull: ["$customer.area", ""] }, revenue: { $sum: "$charges.grandTotal" } } },
+              { $sort: { revenue: -1 } },
+              { $limit: 10 },
+            ],
             topCustomers: [
               {
                 $group: {
                   _id: "$customer.mobileNumber",
                   parentName: { $last: "$customer.parentName" },
+                  children: { $last: "$children" },
                   total_spent: { $sum: "$charges.grandTotal" },
                   visit_count: { $sum: 1 },
                   reward_points: { $sum: "$charges.loyaltyPoints" },
@@ -148,6 +154,7 @@ const dashboardStats = async (req, res) => {
                   "customer.parentName": 1,
                   "customer.bandNumber": 1,
                   "customer.sessionNumber": 1,
+                  children: 1,
                   "charges.grandTotal": 1,
                   createdAt: 1,
                 },
@@ -158,7 +165,7 @@ const dashboardStats = async (req, res) => {
       ]),
       sessionmodel
         .find({ status: "running" })
-        .select("sessionNumber parentName bandNumber scheduledEndTime")
+        .select("sessionNumber parentName children bandNumber scheduledEndTime")
         .sort({ scheduledEndTime: 1 })
         .limit(50)
         .lean(),
@@ -180,6 +187,11 @@ const dashboardStats = async (req, res) => {
       const key = localDateKey(d);
       revenueTrend.push({ date: key, revenue: trendMap.get(key) || 0 });
     }
+
+    const revenueByArea = facets.revenueByArea.map((row) => ({
+      area: row._id?.trim() ? row._id.trim() : "Unknown",
+      revenue: row.revenue || 0,
+    }));
 
     const offerTotals = facets.offerTotals[0] || { usageCount: 0, totalDiscount: 0 };
     const mostUsedOffer = facets.offerUsage[0] || null;
@@ -204,6 +216,7 @@ const dashboardStats = async (req, res) => {
       offerUsage: facets.offerUsage,
       offerAnalytics,
       bestSellingCafeItems: facets.bestSellingCafeItems,
+      revenueByArea,
       activeSessions,
     });
   } catch (error) {
@@ -341,13 +354,20 @@ const monthRange = (month, year) => {
   return { start, end };
 };
 
-// Per-customer stats for one calendar month, computed entirely via aggregation
-// pipelines so the collections are never pulled into app memory wholesale —
-// only the (small) set of rows matching that month's date range is scanned,
-// and only one row per unique customer comes back out.
-const getMonthlyReportData = async (month, year) => {
-  const { start, end } = monthRange(month, year);
+// Builds the [start, end) date range for a full calendar year.
+const yearRange = (year) => {
+  const start = new Date(year, 0, 1, 0, 0, 0, 0);
+  const end = new Date(year + 1, 0, 1, 0, 0, 0, 0);
+  return { start, end };
+};
 
+// Per-customer stats for an arbitrary [start, end) date range, computed
+// entirely via aggregation pipelines so the collections are never pulled into
+// app memory wholesale — only the (small) set of rows matching the range is
+// scanned, and only one row per unique customer comes back out. Shared by
+// both the Monthly and Yearly reports (getMonthlyReportData / below) — only
+// the date range differs between them, every field/metric is identical.
+const getCustomerReportDataForRange = async (start, end) => {
   const [visitAgg, invoiceAgg, cityAgg, areaAgg] = await Promise.all([
     sessionmodel.aggregate([
       { $match: { status: "completed", actualEndTime: { $gte: start, $lt: end } } },
@@ -507,7 +527,21 @@ const getMonthlyReportData = async (month, year) => {
     revenue: row.revenue || 0,
   }));
 
-  return { month: Number(month), year: Number(year), monthName: MONTH_NAMES[month - 1], customers, summary, revenueByCity, revenueByArea };
+  return { customers, summary, revenueByCity, revenueByArea };
+};
+
+const getMonthlyReportData = async (month, year) => {
+  const { start, end } = monthRange(month, year);
+  const data = await getCustomerReportDataForRange(start, end);
+  return { month: Number(month), year: Number(year), monthName: MONTH_NAMES[month - 1], ...data };
+};
+
+// Same fields/metrics as the monthly report — only the date range (a full
+// calendar year instead of one month) differs.
+const getYearlyReportData = async (year) => {
+  const { start, end } = yearRange(year);
+  const data = await getCustomerReportDataForRange(start, end);
+  return { year: Number(year), ...data };
 };
 
 const parseMonthYear = (req, res) => {
@@ -538,19 +572,16 @@ const pad2 = (n) => String(n).padStart(2, "0");
 const formatGeneratedOn = (date) =>
   `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 
-const monthlyCustomerReportPdf = async (req, res) => {
-  try {
-    const parsed = parseMonthYear(req, res);
-    if (!parsed) return;
-
-    const report = await getMonthlyReportData(parsed.month, parsed.year);
-    const { customers, summary, monthName, year, revenueByCity, revenueByArea } = report;
+// Renders the customer report PDF shared by Monthly and Yearly reports —
+// same columns, same summary/revenue cards, same pagination; only the title
+// line, period label, and filename differ between the two callers below.
+const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, report }) => {
+  const { customers, summary, revenueByCity, revenueByArea } = report;
 
     // Landscape — the report now carries 13 columns (area + city +
     // offer/membership + the session/cafe/socks breakdown added on top of
     // the original 7), which no longer fits comfortably on a portrait page.
     const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 40, bufferPages: true });
-    const filename = `Customer_Report_${monthName}_${year}.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -565,15 +596,15 @@ const monthlyCustomerReportPdf = async (req, res) => {
     const columns = [
       { key: "customerId", label: "Customer ID", width: 55, align: "left" },
       { key: "childNames", label: "Child Name(s)", width: 92, align: "left", wrap: true },
-      { key: "parentName", label: "Parent Name", width: 72, align: "left" },
+      { key: "parentName", label: "Parent Name / Guardian Name", width: 96, align: "left" },
       { key: "mobileNumber", label: "Mobile Number", width: 70, align: "left" },
-      { key: "area", label: "Area", width: 44, align: "left" },
-      { key: "city", label: "City", width: 46, align: "left" },
-      { key: "offerOrMembership", label: "Offer / Membership", width: 80, align: "left" },
+      { key: "area", label: "Area", width: 40, align: "left" },
+      { key: "city", label: "City", width: 44, align: "left" },
+      { key: "offerOrMembership", label: "Offer / Membership", width: 72, align: "left" },
       { key: "visits", label: "Visits", width: 36, align: "right" },
       { key: "sessionTotal", label: "Session Total", width: 58, align: "right" },
-      { key: "cafeTotal", label: "Cafe Total", width: 54, align: "right" },
-      { key: "socksQty", label: "Socks Qty", width: 46, align: "right" },
+      { key: "cafeTotal", label: "Cafe Total", width: 50, align: "right" },
+      { key: "socksQty", label: "Socks Qty", width: 40, align: "right" },
       { key: "rewardPoints", label: "Points", width: 42, align: "right" },
       { key: "totalSpent", label: "Total Spent", width: 60, align: "right" },
     ];
@@ -596,9 +627,9 @@ const monthlyCustomerReportPdf = async (req, res) => {
     const drawDocHeader = () => {
       doc.rect(0, 0, doc.page.width, 6).fill("#2563eb");
       doc.font("Helvetica-Bold").fontSize(18).fillColor("#0f172a").text("Crazy Kids", tableLeft, 40);
-      doc.font("Helvetica-Bold").fontSize(13).fillColor("#334155").text("Monthly Customer Report", tableLeft, 62);
+      doc.font("Helvetica-Bold").fontSize(13).fillColor("#334155").text(reportTitle, tableLeft, 62);
       doc.font("Helvetica").fontSize(10).fillColor("#64748b");
-      doc.text(`Report Period : ${monthName} ${year}`, tableLeft, 84);
+      doc.text(`Report Period : ${periodLabel}`, tableLeft, 84);
       doc.text(`Generated On  : ${formatGeneratedOn(new Date())}`, tableLeft, 98);
       doc.moveTo(tableLeft, 118).lineTo(tableLeft + tableWidth, 118).strokeColor("#cbd5e1").lineWidth(1).stroke();
       return 130;
@@ -707,7 +738,7 @@ const monthlyCustomerReportPdf = async (req, res) => {
     });
 
     if (customers.length === 0) {
-      doc.font("Helvetica").fontSize(10).fillColor("#64748b").text("No customer visits recorded for this month.", tableLeft, y + 10);
+      doc.font("Helvetica").fontSize(10).fillColor("#64748b").text("No customer visits recorded for this period.", tableLeft, y + 10);
       y += 30;
     }
 
@@ -783,9 +814,66 @@ const monthlyCustomerReportPdf = async (req, res) => {
     }
 
     doc.end();
+};
+
+const monthlyCustomerReportPdf = async (req, res) => {
+  try {
+    const parsed = parseMonthYear(req, res);
+    if (!parsed) return;
+
+    const report = await getMonthlyReportData(parsed.month, parsed.year);
+    renderCustomerReportPdf(res, {
+      reportTitle: "Monthly Customer Report",
+      periodLabel: `${report.monthName} ${report.year}`,
+      filename: `Customer_Report_${report.monthName}_${report.year}.pdf`,
+      report,
+    });
   } catch (error) {
     if (!res.headersSent) {
       return res.status(500).json({ message: error.message || "Unable to generate monthly report PDF" });
+    }
+    res.end();
+  }
+};
+
+const parseYear = (req, res) => {
+  const year = Number(req.query.year);
+
+  if (!Number.isInteger(year) || year < 2000) {
+    res.status(400).json({ message: "Valid year query param is required" });
+    return null;
+  }
+
+  return { year };
+};
+
+const yearlyCustomerReport = async (req, res) => {
+  try {
+    const parsed = parseYear(req, res);
+    if (!parsed) return;
+
+    const report = await getYearlyReportData(parsed.year);
+    return res.status(200).json(report);
+  } catch (error) {
+    return res.status(500).json({ message: error.message || "Unable to generate yearly report" });
+  }
+};
+
+const yearlyCustomerReportPdf = async (req, res) => {
+  try {
+    const parsed = parseYear(req, res);
+    if (!parsed) return;
+
+    const report = await getYearlyReportData(parsed.year);
+    renderCustomerReportPdf(res, {
+      reportTitle: "Yearly Customer Report",
+      periodLabel: String(report.year),
+      filename: `Customer_Report_${report.year}.pdf`,
+      report,
+    });
+  } catch (error) {
+    if (!res.headersSent) {
+      return res.status(500).json({ message: error.message || "Unable to generate yearly report PDF" });
     }
     res.end();
   }
@@ -796,4 +884,6 @@ module.exports = {
   dashboardStats,
   monthlyCustomerReport,
   monthlyCustomerReportPdf,
+  yearlyCustomerReport,
+  yearlyCustomerReportPdf,
 };

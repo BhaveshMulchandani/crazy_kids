@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { StatCard } from "../../components/stat-card";
+import { getDisplayName } from "../../utils/customerDisplay";
 import {
   Receipt,
   IndianRupee,
@@ -123,6 +124,11 @@ export default function Dashboard() {
     qty: c.qty,
   }));
 
+  const areaRevenueData = (stats.revenueByArea || []).map((a) => ({
+    name: a.area,
+    revenue: a.revenue,
+  }));
+
   const recentTransactions = stats.recentTransactions || [];
 
   return (
@@ -173,7 +179,7 @@ export default function Dashboard() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
           <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p><p className="mt-1 text-sm text-muted-foreground">{membershipAnalytics.expiringSoon.length} memberships expire within 7 days.</p></div>
-          <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Recently purchased memberships</h3><div className="mt-2 space-y-1 text-sm">{membershipAnalytics.recent.slice(0, 3).map((item) => <div key={item._id} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5"><span className="min-w-0 truncate">{item.customer?.parentName} · {item.planName}</span><span className="text-muted-foreground shrink-0">{new Date(item.purchaseDate).toLocaleDateString()}</span></div>)}{membershipAnalytics.recent.length === 0 && <span className="text-muted-foreground">No memberships purchased yet.</span>}</div></div>
+          <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Recently purchased memberships</h3><div className="mt-2 space-y-1 text-sm">{membershipAnalytics.recent.slice(0, 3).map((item) => <div key={item._id} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5"><span className="min-w-0 truncate">{getDisplayName({ parentName: item.customer?.parentName, children: item.registeredChildren })} · {item.planName}</span><span className="text-muted-foreground shrink-0">{new Date(item.purchaseDate).toLocaleDateString()}</span></div>)}{membershipAnalytics.recent.length === 0 && <span className="text-muted-foreground">No memberships purchased yet.</span>}</div></div>
         </div>
       </>}
 
@@ -268,7 +274,7 @@ export default function Dashboard() {
                     {s.bandNumber || s.sessionNumber}
                   </div>
                   <div className="font-semibold text-sm truncate">
-                    {s.parentName}
+                    {getDisplayName(s)}
                   </div>
                   <div className="mt-1 flex items-center gap-1 font-mono text-lg tabular-nums">
                     {exp && (
@@ -420,7 +426,7 @@ export default function Dashboard() {
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-medium truncate">
-                      {c.parentName}
+                      {getDisplayName(c)}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {c.visit_count ?? 0} visits · {c.reward_points ?? 0} pts
@@ -443,7 +449,7 @@ export default function Dashboard() {
               >
                 <div>
                   <div className="text-sm font-medium">
-                    {b.customer?.parentName ?? "—"}
+                    {getDisplayName({ parentName: b.customer?.parentName, children: b.children })}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {b.customer?.bandNumber || b.customer?.sessionNumber}
@@ -455,6 +461,35 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      <div className="surface-card p-4 sm:p-6 min-w-0">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="font-semibold">Revenue by area</h3>
+            <p className="text-xs text-muted-foreground">All-time revenue per play area</p>
+          </div>
+        </div>
+        <div className="h-72">
+          {areaRevenueData.length === 0 ? (
+            <div className="h-full grid place-items-center text-sm text-muted-foreground">
+              No revenue recorded yet
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={areaRevenueData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                <YAxis stroke="#94a3b8" fontSize={12} />
+                <Tooltip
+                  formatter={(value) => [`₹${Number(value).toLocaleString()}`, "Revenue"]}
+                  contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0" }}
+                />
+                <Bar dataKey="revenue" radius={[8, 8, 0, 0]} fill="#3b82f6" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </div>

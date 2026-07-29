@@ -1,11 +1,9 @@
 const sessionmodel = require("../models/session.model");
 const Notification = require("../models/notification.model");
+const { getDisplayName } = require("../utils/customerDisplay");
 
-const buildOverdueMessage = (session) => {
-  const child = session.children?.[0];
-  if (child?.name) return `${child.name}'s session has ended and is waiting for checkout.`;
-  return `${session.parentName}'s session has ended and is waiting for checkout.`;
-};
+const buildOverdueMessage = (session) =>
+  `${getDisplayName(session)}'s session has ended and is waiting for checkout.`;
 
 // Sessions whose scheduled end time has passed but are still
 // running/paused (i.e. not yet checked out) get a one-time "waiting for

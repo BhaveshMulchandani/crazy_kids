@@ -7,5 +7,7 @@ router.get('/customers', isloggedin, isadmin, admincontroller.fetchcustomers);
 router.get('/dashboard', isloggedin, isadmin, admincontroller.dashboardStats);
 router.get('/reports/monthly', isloggedin, isadmin, admincontroller.monthlyCustomerReport);
 router.get('/reports/monthly/pdf', isloggedin, isadmin, admincontroller.monthlyCustomerReportPdf);
+router.get('/reports/yearly', isloggedin, isadmin, admincontroller.yearlyCustomerReport);
+router.get('/reports/yearly/pdf', isloggedin, isadmin, admincontroller.yearlyCustomerReportPdf);
 
 module.exports = router;

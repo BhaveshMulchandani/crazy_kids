@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "react-router-dom";
+import { getDisplayName } from "../../utils/customerDisplay";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -131,7 +132,7 @@ function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
 
   const kotNumber = kot.kotNumber ?? kot._id ?? "—";
   const sessionNumber = customer?.sessionNumber ?? "—";
-  const parentName = customer?.parentName ?? "—";
+  const parentName = customer ? getDisplayName(customer) : "—";
   const createdAt = kot.createdAt ? new Date(kot.createdAt) : new Date();
   const total = cartSnapshot.reduce((sum, item) => sum + item.qty * item.price, 0);
 
@@ -247,7 +248,7 @@ function Cafepos() {
     if (!preSelectedSession) return;
 
     applyCustomerSession(preSelectedSession);
-    setCustomerLookup(preSelectedSession.parentName);
+    setCustomerLookup(getDisplayName(preSelectedSession));
   }, [preSelectedSession, applyCustomerSession]);
 
   React.useEffect(() => {
@@ -492,7 +493,7 @@ function Cafepos() {
             <div className="mt-2 flex gap-2">
               <Input
                 className="h-10"
-                placeholder="Mobile, name, or band no."
+                placeholder="Mobile, name, band no., or child name"
                 value={customerLookup}
                 onChange={(e) => { setCustomerLookup(e.target.value); setSearchResults([]); }}
                 onKeyDown={(e) => e.key === "Enter" && findCustomer()}
@@ -511,7 +512,7 @@ function Cafepos() {
                     onClick={() => selectSession(s)}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-secondary/60 border-b last:border-b-0"
                   >
-                    <div className="font-medium">{s.parentName}</div>
+                    <div className="font-medium">{getDisplayName(s)}</div>
                     <div className="text-xs text-muted-foreground">{s.mobileNumber} · {s.sessionNumber}</div>
                   </button>
                 ))}
@@ -522,7 +523,7 @@ function Cafepos() {
               <div className="mt-3 rounded-xl border bg-secondary/40 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="font-semibold truncate">{customer.parentName}</div>
+                    <div className="font-semibold truncate">{getDisplayName(customer)}</div>
                     <div className="text-xs text-muted-foreground truncate">
                       {customer.mobileNumber} · <span className="font-mono text-primary">{customer.sessionNumber}</span>
                     </div>
@@ -535,7 +536,7 @@ function Cafepos() {
                   <div className="mt-2 flex flex-wrap gap-1">
                     {customer.children.map((c, i) => (
                       <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-card text-xs">
-                        {c.name} · {c.age}y
+                        {c.name}{c.age != null ? ` · ${c.age}y` : ""}
                       </span>
                     ))}
                   </div>

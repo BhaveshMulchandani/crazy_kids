@@ -6,6 +6,14 @@ const PriceSetting = require("../models/price.model");
 const { calculateInvoiceCharges } = require("../services/billing.service");
 const whatsappService = require("../services/whatsapp.service");
 const { getNextFormattedNumber } = require("../services/counter.service");
+const { getDisplayName } = require("../utils/customerDisplay");
+
+const isBirthdayToday = (dob) => {
+  if (!dob) return false;
+  const today = new Date();
+  const birthDate = new Date(dob);
+  return today.getDate() === birthDate.getDate() && today.getMonth() === birthDate.getMonth();
+};
 
 // countDocuments()+1 is not concurrency-safe (two concurrent invoice
 // creations can read the same count before either write lands) and would
@@ -33,11 +41,19 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
     ? Math.max(0, Math.round((endTime.getTime() - startTime.getTime()) / 60000))
     : 0;
   const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
-  const loyaltyPoints = Math.floor(Number(calculation.grandTotal || 0) / 100) * pointsPer100;
+  // Same birthday exemption as session.controller.js:completesession — no
+  // loyalty points at all when any child in the session has a birthday
+  // today, regardless of which route ends up creating the invoice.
+  const hasBirthdayChild = (session.children || []).some((child) => isBirthdayToday(child.dob));
+  const loyaltyPoints = hasBirthdayChild ? 0 : Math.floor(Number(calculation.grandTotal || 0) / 100) * pointsPer100;
 
   return {
     customer: {
-      parentName: session.parentName || "",
+      // Falls back to session.children[0].name (the real representative/
+      // placeholder child) whenever parentName is blank — mirrors
+      // session.controller.js:completesession so the invoice's customer name
+      // is never blank regardless of which route creates it.
+      parentName: getDisplayName({ parentName: session.parentName, children: session.children }),
       mobileNumber: session.mobileNumber || "",
       bandNumber: session.bandNumber || "",
       sessionNumber: session.sessionNumber || "",
@@ -45,6 +61,7 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
       city: session.city || "",
     },
     children: calculation.childCharges,
+    groupBooking: calculation.groupBooking || undefined,
     sessionDetails: {
       startTime: session.startTime || null,
       endTime: session.actualEndTime || null,
@@ -501,7 +518,10 @@ const sendInvoiceWhatsApp = async (req, res) => {
 
     const session = invoice.session ? await Session.findById(invoice.session).lean() : null;
 
-    const parentName = session?.parentName || invoice.customer?.parentName || "";
+    const parentName = getDisplayName({
+      parentName: session?.parentName || invoice.customer?.parentName || "",
+      children: session?.children || invoice.children || [],
+    });
     const mobileNumber = session?.mobileNumber || invoice.customer?.mobileNumber || "";
     const rewardPoints = invoice.charges?.loyaltyPoints;
     console.log("[invoice.controller] send-whatsapp: resolved recipient", {
