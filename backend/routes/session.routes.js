@@ -3,18 +3,18 @@ const router = express.Router()
 const sessioncontroller = require('../controllers/session.controller')
 const authmiddleware = require('../middlewares/user.middleware')
 
-router.get("/billing/search",authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.searchBillingCustomer);
-router.post('/create',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.createsession)
-router.get('/booked',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.bookedsession)
-router.get('/running/',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.runningsession)
-router.get('/completed/recent',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.recentCompletedSessions)
-router.patch('/start/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.startsession)
-router.patch('/pause/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.pausesession)
-router.patch('/extend/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.extendsession)
-router.patch('/resume/:id',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.resumesession)
-router.patch("/complete/:id",authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.completesession);
-router.patch('/pause-child/:id/:index',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.pauseChild)
-router.patch('/resume-child/:id/:index',authmiddleware.isloggedin,authmiddleware.isdesk,sessioncontroller.resumeChild)
+router.get("/billing/search",authmiddleware.isLoggedInAsDesk,sessioncontroller.searchBillingCustomer);
+router.post('/create',authmiddleware.isLoggedInAsDesk,sessioncontroller.createsession)
+router.get('/booked',authmiddleware.isLoggedInAsDesk,sessioncontroller.bookedsession)
+router.get('/running/',authmiddleware.isLoggedInAsDesk,sessioncontroller.runningsession)
+router.get('/completed/recent',authmiddleware.isLoggedInAsDesk,sessioncontroller.recentCompletedSessions)
+router.patch('/start/:id',authmiddleware.isLoggedInAsDesk,sessioncontroller.startsession)
+router.patch('/pause/:id',authmiddleware.isLoggedInAsDesk,sessioncontroller.pausesession)
+router.patch('/extend/:id',authmiddleware.isLoggedInAsDesk,sessioncontroller.extendsession)
+router.patch('/resume/:id',authmiddleware.isLoggedInAsDesk,sessioncontroller.resumesession)
+router.patch("/complete/:id",authmiddleware.isLoggedInAsDesk,sessioncontroller.completesession);
+router.patch('/pause-child/:id/:index',authmiddleware.isLoggedInAsDesk,sessioncontroller.pauseChild)
+router.patch('/resume-child/:id/:index',authmiddleware.isLoggedInAsDesk,sessioncontroller.resumeChild)
 
 
 module.exports = router

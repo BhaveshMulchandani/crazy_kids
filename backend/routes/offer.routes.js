@@ -3,16 +3,18 @@ const router = express.Router()
 const authmiddleware = require('../middlewares/user.middleware')
 const offercontroller = require('../controllers/offer.controller')
 
-router.post('/createoffer', authmiddleware.isloggedin, authmiddleware.isadmin, offercontroller.createOffer)
+router.post('/createoffer', authmiddleware.isLoggedInAsAdmin, offercontroller.createOffer)
 
-router.get("/", authmiddleware.isloggedin, authmiddleware.isadmin, offercontroller.getoffer);
+router.get("/", authmiddleware.isLoggedInAsAdmin, offercontroller.getoffer);
 
+// Read by both sections (desk Billing.jsx loads it when booking, admin
+// Offers.jsx manages it) — role-agnostic, either an admin or desk session is fine.
 router.get("/active", authmiddleware.isloggedin, offercontroller.getactiveoffers);
 
-router.patch("/:id/toggle", authmiddleware.isloggedin, authmiddleware.isadmin, offercontroller.toggleoffer);
+router.patch("/:id/toggle", authmiddleware.isLoggedInAsAdmin, offercontroller.toggleoffer);
 
-router.put("/:id", authmiddleware.isloggedin, authmiddleware.isadmin, offercontroller.updateoffer);
+router.put("/:id", authmiddleware.isLoggedInAsAdmin, offercontroller.updateoffer);
 
-router.delete("/:id", authmiddleware.isloggedin, authmiddleware.isadmin, offercontroller.deleteoffer);
+router.delete("/:id", authmiddleware.isLoggedInAsAdmin, offercontroller.deleteoffer);
 
 module.exports = router

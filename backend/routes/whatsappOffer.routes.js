@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const { isloggedin, isadmin } = require("../middlewares/user.middleware");
+const { isLoggedInAsAdmin } = require("../middlewares/user.middleware");
 const whatsappOfferController = require("../controllers/whatsappOffer.controller");
 
-router.post("/send", isloggedin, isadmin, whatsappOfferController.sendOfferCampaign);
+router.post("/send", isLoggedInAsAdmin, whatsappOfferController.sendOfferCampaign);
 
 module.exports = router;

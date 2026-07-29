@@ -24,9 +24,14 @@ export default function Adminsidenav() {
   const navigate = useNavigate();
 
   const handlelogout = async () => {
-    let response = await axios.post(`${import.meta.env.VITE_API_URL}/users/logout`, {
-      withCredentials: true,
-    });
+    // Tells the backend to clear only the admin session cookie — a shared
+    // front-desk browser may also have a desk session logged in under a
+    // separate cookie, and that must survive this logout untouched.
+    let response = await axios.post(
+      `${import.meta.env.VITE_API_URL}/users/logout`,
+      { role: "admin" },
+      { withCredentials: true },
+    );
 
     if (response.status === 200) {
       navigate("/");

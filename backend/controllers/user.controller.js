@@ -1,6 +1,7 @@
 const usermodel = require("../models/user.model")
 const bcrypt = require("bcryptjs")
 const jwt = require("jsonwebtoken")
+const { COOKIE_NAMES, TOKEN_TTL_MS } = require("../middlewares/user.middleware")
 
 const register = async (req, res) => {
 
@@ -57,10 +58,18 @@ const login = async (req, res) => {
 
         let token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" })
 
-        res.cookie("token", token, {
+        // A separate cookie per role (admin_token / desk_token) so an admin
+        // and a desk session can coexist on the same shared browser without
+        // one login silently overwriting the other's session. maxAge matches
+        // the token's own "1d" expiresIn — without it, this was a browser
+        // session cookie that could vanish well before the token actually
+        // expired, logging people out (and losing unsaved form data) with no
+        // warning.
+        res.cookie(COOKIE_NAMES[user.role] || COOKIE_NAMES.desk, token, {
             httpOnly: true,
             secure: true,
             sameSite: "none",
+            maxAge: TOKEN_TTL_MS,
         });
 
         return res.status(200).json({ message: "User logged in successfully", user })
@@ -72,7 +81,20 @@ const login = async (req, res) => {
 }
 
 const logout = async (req, res) => {
-    res.clearCookie("token")
+    // Only clears the calling role's own cookie when told which one (the
+    // admin/desk navbars each pass their own role) — a desk logout must
+    // never also kill an admin session open in another tab of the same
+    // shared browser, and vice versa. Falls back to clearing both when the
+    // caller doesn't specify (e.g. an older cached frontend build).
+    const { role } = req.body || {}
+
+    if (role === "admin" || role === "desk") {
+        res.clearCookie(COOKIE_NAMES[role])
+    } else {
+        res.clearCookie(COOKIE_NAMES.admin)
+        res.clearCookie(COOKIE_NAMES.desk)
+    }
+
     return res.status(200).json({ message: "User logged out successfully" })
 }
 

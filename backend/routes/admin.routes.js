@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const {isloggedin, isadmin} = require('../middlewares/user.middleware');
+const {isLoggedInAsAdmin} = require('../middlewares/user.middleware');
 const admincontroller = require('../controllers/admin.controller');
 
-router.get('/customers', isloggedin, isadmin, admincontroller.fetchcustomers);
-router.get('/dashboard', isloggedin, isadmin, admincontroller.dashboardStats);
-router.get('/reports/monthly', isloggedin, isadmin, admincontroller.monthlyCustomerReport);
-router.get('/reports/monthly/pdf', isloggedin, isadmin, admincontroller.monthlyCustomerReportPdf);
-router.get('/reports/yearly', isloggedin, isadmin, admincontroller.yearlyCustomerReport);
-router.get('/reports/yearly/pdf', isloggedin, isadmin, admincontroller.yearlyCustomerReportPdf);
+router.get('/customers', isLoggedInAsAdmin, admincontroller.fetchcustomers);
+router.get('/dashboard', isLoggedInAsAdmin, admincontroller.dashboardStats);
+router.get('/reports/monthly', isLoggedInAsAdmin, admincontroller.monthlyCustomerReport);
+router.get('/reports/monthly/pdf', isLoggedInAsAdmin, admincontroller.monthlyCustomerReportPdf);
+router.get('/reports/yearly', isLoggedInAsAdmin, admincontroller.yearlyCustomerReport);
+router.get('/reports/yearly/pdf', isLoggedInAsAdmin, admincontroller.yearlyCustomerReportPdf);
 
 module.exports = router;
