@@ -1,26 +1,80 @@
 {
   "name": "crazy_kids",
   "version": "1.0.0",
-  "description": "",
+  "description": "Crazy Kids POS",
   "main": "electron/main.js",
+  "author": "Sosiyo",
+  "license": "ISC",
+  "type": "commonjs",
+
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "frontend": "cd frontend && npm run dev",
     "backend": "cd backend && npx nodemon",
     "electron": "wait-on http://localhost:5173 && electron .",
-    "dev": "concurrently \"npm run backend\" \"npm run frontend\" \"npm run electron\""
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\" \"npm run electron\"",
+
+    "build": "cd frontend && npm run build",
+
+    "dist": "npm run build && electron-builder --win"
   },
+
+  "build": {
+    "appId": "com.sosiyo.pos",
+    "productName": "Crazy Kids POS",
+
+    "directories": {
+      "output": "dist"
+    },
+
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+
+    "asar": true,
+
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/logo.ico"
+    },
+
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Crazy Kids POS",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    }
+  },
+
   "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+
   "devDependencies": {
     "autoprefixer": "^10.5.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^42.2.0",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.5.15",
     "tailwindcss": "^3.4.19",
     "wait-on": "^9.0.10"
+  },
+
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }
