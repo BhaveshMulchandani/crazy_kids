@@ -470,7 +470,7 @@ export default function Dashboard() {
       <div className="surface-card p-4 sm:p-6 min-w-0">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="font-semibold">Revenue by area</h3>
+            <h3 className="font-semibold">area and revenue analytics</h3>
             <p className="text-xs text-muted-foreground">All-time revenue and customers per play area</p>
           </div>
         </div>
