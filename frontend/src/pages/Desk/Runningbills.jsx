@@ -175,7 +175,16 @@ const calculateSessionCharge = (bill, pricingSettings) => {
     : children.map((child) => ({
         name: child?.name || "",
         age: child?.age ?? null,
-        amount: round2(rateFor((child?.age ?? 0) < 3)),
+        // Pricing bracket comes from the operator-selected ageCategory, not
+        // DOB — falls back to the legacy age-based check only for sessions
+        // booked before ageCategory existed (see billing.service.js).
+        amount: round2(
+          rateFor(
+            child?.ageCategory
+              ? child.ageCategory === "below_3"
+              : (child?.age ?? 0) < 3,
+          ),
+        ),
       }));
 
   const subtotal = round2(breakdown.reduce((total, row) => total + row.amount, 0));

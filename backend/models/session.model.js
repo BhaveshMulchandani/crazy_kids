@@ -47,6 +47,18 @@ const childSchema = new mongoose.Schema(
       min: 0,
     },
 
+    // The source of truth for pricing (see billing.service.js) — DOB is
+    // optional and no longer used to derive the billing age bracket, so this
+    // is collected explicitly on the booking form instead. Nullable so
+    // sessions created before this field existed keep loading unchanged;
+    // billing.service.js falls back to the legacy age/dob calculation when
+    // it's absent.
+    ageCategory: {
+      type: String,
+      enum: ["above_3", "below_3", null],
+      default: null,
+    },
+
     gender: {
       type: String,
       enum: ["boy", "girl", "not_specified"],

@@ -40,8 +40,9 @@ const Invoice = require('../models/invoice.model');
 const KOT = require('../models/cafe.model');
 const PriceSetting = require('../models/price.model');
 const Membership = require('../models/membership.model');
+const Offer = require('../models/offer.model');
 const { createMembership, refreshStatus } = require('./membership.controller');
-const { calculateInvoiceCharges } = require('../services/billing.service');
+const { calculateInvoiceCharges, dayName } = require('../services/billing.service');
 const Notification = require('../models/notification.model');
 const { getNextFormattedNumber } = require('../services/counter.service');
 const { buildCustomerNameOr } = require('../utils/customerSearch');
@@ -195,11 +196,22 @@ const createsession = async (
         });
       }
 
+      const AGE_CATEGORY_VALUES = ["above_3", "below_3"];
       processedChildren =
         children.map((child) => {
           if (!child.name?.trim()) {
             throw new Error(
               "Each child must have a name"
+            );
+          }
+
+          // Age Category is the sole driver of session pricing (see
+          // billing.service.js) — DOB is optional and only kept for record
+          // purposes, so this is required independently of whether a DOB is
+          // provided.
+          if (!AGE_CATEGORY_VALUES.includes(child.ageCategory)) {
+            throw new Error(
+              "Each child must have an Age Category (Above 3 Years or Below 3 Years)"
             );
           }
 
@@ -209,6 +221,7 @@ const createsession = async (
             age: child.dob ? calculateAge(
               child.dob
             ) : null,
+            ageCategory: child.ageCategory,
             gender: GENDER_VALUES.includes(child.gender)
               ? child.gender
               : "not_specified",
@@ -275,6 +288,24 @@ const createsession = async (
         await activeMembership.save();
       }
     }
+
+    // Auto-apply a day-based offer (e.g. "Wow Wednesday") when the operator
+    // didn't manually pick one, so a forgotten manual selection no longer
+    // costs the customer their discount. Mirrors the specialDayMatches check
+    // billing.service.js already runs at checkout — this just pre-attaches
+    // the matching offer at booking time instead of leaving session.offer
+    // null. Skipped when a membership already covers the session (it always
+    // wins over any offer) or when this booking is purchasing a membership.
+    let autoOfferId = null;
+    if (!offer && !purchaseMembershipPlan && !membershipHasSufficientHours) {
+      const today = dayName(new Date());
+      const dayOffer = await Offer.findOne({
+        active: true,
+        "rules.day": { $regex: `^${today}$`, $options: "i" },
+      }).sort({ createdAt: -1 });
+      if (dayOffer) autoOfferId = dayOffer._id;
+    }
+
     const session =
       await sessionmodel.create({
         sessionNumber,
@@ -301,7 +332,7 @@ const createsession = async (
           groupBookingData,
 
         offer:
-          purchaseMembershipPlan ? null : offer || null,
+          purchaseMembershipPlan ? null : (offer || autoOfferId || null),
         membership: membershipHasSufficientHours ? activeMembership._id : null,
         membershipPurchase: purchasedMembership ? { membership: purchasedMembership._id, planName: purchasedMembership.planName, price: purchasedMembership.purchasePrice } : undefined,
 

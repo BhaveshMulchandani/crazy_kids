@@ -5,6 +5,16 @@ const { refreshStatus } = require("../controllers/membership.controller");
 const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const dayName = (date) => new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
 
+// Pricing bracket now comes from the operator-selected ageCategory, not DOB —
+// DOB is optional and no longer drives billing. `age` (dob-derived, if any)
+// is kept only as a fallback for sessions booked before ageCategory existed,
+// so old/in-flight sessions keep pricing exactly as they did before.
+const isUnder3 = (child) => {
+  if (child.ageCategory === "below_3") return true;
+  if (child.ageCategory === "above_3") return false;
+  return Number(child.age || 0) < 3;
+};
+
 const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount, extraDiscountType, extraDiscountValue }) => {
   const totalHours = Number(session.totalHours || 1);
   const extensionHours = Math.max(totalHours - 1, 0);
@@ -31,10 +41,17 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount,
     if (membership?.status === "active" && membership.kidsAllowed >= childCount && membership.remainingPlayHours >= totalHours) membershipApplied = true;
   }
 
+  // Mirrors the membership resolution above: `session.offer` may be an
+  // already-populated Offer document (e.g. from runningsession's
+  // .populate("offer")) or a raw ObjectId (e.g. from completesession's plain
+  // findById) — a raw ObjectId is also `typeof "object"`, so it can't be
+  // told apart from a populated doc that way. Only a populated doc has
+  // `name` (a required Offer field), so that's used to decide whether a
+  // fresh fetch is needed.
   let offer = null;
-  if (!membershipApplied) {
-    offer = session.offer && typeof session.offer === "object" ? session.offer : null;
-    if (!offer && session.offer) offer = await Offer.findById(session.offer);
+  if (!membershipApplied && session.offer) {
+    const offerId = session.offer._id || session.offer;
+    offer = session.offer.name !== undefined ? session.offer : await Offer.findById(offerId);
     if (offer && !offer.active) offer = null;
   }
 
@@ -88,8 +105,8 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount,
     ].filter(Boolean);
   } else {
     childCharges = children.map((child) => {
-      const { firstHourCharge, extensionRate } = rateFor(Number(child.age || 0) < 3);
-      return { name: child.name || "", dob: child.dob || null, age: Number(child.age || 0), gender: child.gender || "not_specified", firstHourCharge, extensionHours, extensionRate, childTotal: round(firstHourCharge + extensionHours * extensionRate), socksOpted: Boolean(child.socksOpted) };
+      const { firstHourCharge, extensionRate } = rateFor(isUnder3(child));
+      return { name: child.name || "", dob: child.dob || null, age: Number(child.age || 0), ageCategory: child.ageCategory || null, gender: child.gender || "not_specified", firstHourCharge, extensionHours, extensionRate, childTotal: round(firstHourCharge + extensionHours * extensionRate), socksOpted: Boolean(child.socksOpted) };
     });
   }
   const normalSessionTotal = round(childCharges.reduce((sum, child) => sum + child.childTotal, 0));
@@ -131,4 +148,4 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount,
   return { totalHours, extensionHours, childCharges, cafeItems, normalSessionTotal, sessionTotal, cafeSubtotal, cafeGST, cafeTotal, grandTotal, discountAmount, extraDiscountAmount, extraDiscountType: normalizedExtraDiscountType, extraDiscountValue: rawExtraDiscountValue, membershipApplied, membership, specialPricingApplied, offer: offer ? { name: offer.name, type: offer.type, value: offer.value } : null, membershipPurchase, socksQty, socksRate, socksTotal, groupBooking: groupBooking ? { representativeChildName: groupBooking.representativeChildName || "", totalChildren: Number(groupBooking.totalChildren || 0), aboveThreeCount: Number(groupBooking.aboveThreeCount || 0), belowThreeCount: Number(groupBooking.belowThreeCount || 0), socksRequired: Number(groupBooking.socksRequired || 0) } : null };
 };
 
-module.exports = { calculateInvoiceCharges, round };
+module.exports = { calculateInvoiceCharges, round, dayName };

@@ -52,10 +52,9 @@ const calculateEstimatedSessionCharge = (children, pricingSettings) => {
   const subtotal = (children || []).reduce((total, child) => {
     if (!child?.name?.trim()) return total;
 
-    // No DOB on file — mirrors billing.service.js: an unknown age is billed
-    // at the standard (3+ years) rate rather than being skipped/free.
-    const age = child?.dob ? ageInYears(child.dob) : null;
-    const isUnder3 = age !== null && age < 3;
+    // Pricing bracket comes from the operator-selected Age Category, not
+    // DOB — mirrors billing.service.js.
+    const isUnder3 = child?.ageCategory === "below_3";
     const firstHourRate = isUnder3
       ? Number(pricingSettings?.firstHourUnder3 ?? 0)
       : Number(pricingSettings?.firstHourAbove3 ?? 0);
@@ -75,6 +74,21 @@ const calculateEstimatedSessionCharge = (children, pricingSettings) => {
     socksQty,
     socksTotal,
   };
+};
+
+// Finds today's active day-based offer (e.g. "Wow Wednesday", a
+// special_pricing offer with rules.day set) so it can be pre-selected
+// without the operator having to remember to pick it manually. Mirrors the
+// day-match check billing.service.js runs at checkout.
+const getDayOfferId = (offerList) => {
+  const today = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(new Date());
+  const dayOffer = (offerList || []).find(
+    (offer) =>
+      offer.active !== false &&
+      offer.type !== "membership" &&
+      String(offer.rules?.day || "").toLowerCase() === today.toLowerCase(),
+  );
+  return dayOffer ? dayOffer.id : null;
 };
 
 // Mirrors billing.service.js's group-booking branch: priced purely from the
@@ -189,7 +203,7 @@ function BillingPage() {
   const [mobile, setMobile] = useState("");
   const [area, setArea] = useState("");
   const [city, setCity] = useState("");
-  const [children, setChildren] = useState([{ name: "", dob: "", gender: "not_specified", socksOpted: false }]);
+  const [children, setChildren] = useState([{ name: "", dob: "", ageCategory: "", gender: "not_specified", socksOpted: false }]);
   const [notes, setNotes] = useState("");
   const [bandNumber, setBandNumber] = useState("");
   const [offerId, setOfferId] = useState("none");
@@ -224,12 +238,16 @@ function BillingPage() {
           ? response.data.offers
           : [];
         if (mounted) {
-          setOffers(
-            data.map((offer) => ({
-              ...offer,
-              id: offer.id || offer._id,
-            })),
-          );
+          const mapped = data.map((offer) => ({
+            ...offer,
+            id: offer.id || offer._id,
+          }));
+          setOffers(mapped);
+          // Pre-select today's day-based offer (e.g. "Wow Wednesday") so the
+          // operator doesn't have to remember to apply it manually. Still
+          // just a default — the dropdown below remains fully editable.
+          const dayOfferId = getDayOfferId(mapped);
+          if (dayOfferId) setOfferId(dayOfferId);
         }
       } catch (error) {
         console.warn("Unable to load offers", error);
@@ -257,7 +275,7 @@ function BillingPage() {
   }, []);
 
   const addChild = () => {
-    setChildren([...children, { name: "", dob: "", gender: "not_specified", socksOpted: false }]);
+    setChildren([...children, { name: "", dob: "", ageCategory: "", gender: "not_specified", socksOpted: false }]);
   };
 
   const removeChild = (i) => {
@@ -297,11 +315,14 @@ function BillingPage() {
     const mappedChildren = (selectedCustomer.children || []).map((child) => ({
       name: child.name || "",
       dob: child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "",
+      // Age Category is mandatory per session, not carried over from
+      // historical customer records — the operator must (re)select it.
+      ageCategory: "",
       gender: child.gender || "not_specified",
       socksOpted: false,
     }));
 
-    setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "", gender: "not_specified", socksOpted: false }]);
+    setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "", ageCategory: "", gender: "not_specified", socksOpted: false }]);
     setSearchResults([]);
     setErrors((prev) => ({ ...prev, parentName: "", mobile: "", area: "", city: "" }));
     axios.get(`${API_BASE}/memberships/active/${encodeURIComponent(selectedCustomer.mobileNumber || "")}`, { withCredentials: true })
@@ -407,6 +428,13 @@ function BillingPage() {
         children.forEach((child, index) => {
           if (!child.name.trim()) {
             nextErrors[`child-${index}-name`] = "Child name is required";
+          }
+          if (
+            child.name.trim() &&
+            child.ageCategory !== "above_3" &&
+            child.ageCategory !== "below_3"
+          ) {
+            nextErrors[`child-${index}-ageCategory`] = "Age Category is required";
           }
         });
       }
@@ -523,6 +551,7 @@ function BillingPage() {
               .map((c) => ({
                 name: c.name.trim(),
                 dob: c.dob || null,
+                ageCategory: c.ageCategory,
                 gender: c.gender || "not_specified",
                 socksOpted: Boolean(c.socksOpted),
               })),
@@ -553,9 +582,11 @@ function BillingPage() {
     setCity("");
     setLookup("");
     setSearchResults([]);
-    setChildren([{ name: "", dob: "", gender: "not_specified", socksOpted: false }]);
+    setChildren([{ name: "", dob: "", ageCategory: "", gender: "not_specified", socksOpted: false }]);
     setBandNumber("");
-    setOfferId("none");
+    // Re-apply today's day-based offer default for the next booking, rather
+    // than leaving it cleared to "none" — see loadOffers above.
+    setOfferId(getDayOfferId(offers) || "none");
     setMembershipPlanId("none");
     setMembership(null);
     setReference("");
@@ -587,11 +618,27 @@ function BillingPage() {
 
   return (
     <div className="w-full max-w-[1920px] mx-auto space-y-6 px-6 py-8">
-      <div>
-        <h1 className="text-3xl font-semibold">Start New Session</h1>
-        <p className="text-muted-foreground mt-1">
-          Open a running bill for a family. Charges accrue live until checkout.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold">Start New Session</h1>
+          <p className="text-muted-foreground mt-1">
+            Open a running bill for a family. Charges accrue live until checkout.
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-pressed={isGroupBooking}
+          onClick={() => {
+            setIsGroupBooking(!isGroupBooking);
+            setErrors({});
+          }}
+          className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 ${
+            isGroupBooking ? "bg-red-700 ring-2 ring-red-300" : "bg-red-600 hover:bg-red-700"
+          }`}
+        >
+          <UsersRound className="h-4 w-4" />
+          {isGroupBooking ? "Group Booking: ON" : "Group Booking"}
+        </button>
       </div>
 
       <div className="surface-card p-5">
@@ -743,23 +790,11 @@ function BillingPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-xl border bg-secondary/30 p-3">
-            <div>
-              <Label className="flex items-center gap-1.5">
-                <UsersRound className="h-3.5 w-3.5" /> Group Booking
-              </Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Large group (10-20+ kids)? Skip per-child entry and book by headcount instead.
-              </p>
-            </div>
-            <Switch
-              checked={isGroupBooking}
-              onCheckedChange={(checked) => {
-                setIsGroupBooking(checked);
-                setErrors({});
-              }}
-            />
-          </div>
+          {isGroupBooking && (
+            <p className="text-xs text-muted-foreground -mt-2">
+              Large group (10-20+ kids) — booking by headcount instead of per-child entry. Use the Group Booking button above to switch back.
+            </p>
+          )}
 
           {isGroupBooking ? (
             <div className="space-y-4">
@@ -870,12 +905,13 @@ function BillingPage() {
                 const age = c.dob ? ageInYears(c.dob) : null;
                 const childNameError = errors[`child-${i}-name`];
                 const childDobError = errors[`child-${i}-dob`];
+                const childAgeCategoryError = errors[`child-${i}-ageCategory`];
                 return (
                   <div
                     key={i}
                     className="grid grid-cols-12 gap-2 items-center p-3 rounded-xl bg-secondary/40 border"
                   >
-                    <div className="col-span-3">
+                    <div className="col-span-2">
                       <Input
                         placeholder="Child name"
                         value={c.name}
@@ -887,7 +923,7 @@ function BillingPage() {
                       />
                       {childNameError && <p className="mt-1 text-xs text-red-500">{childNameError}</p>}
                     </div>
-                      <div className="col-span-3">
+                      <div className="col-span-2">
                         {isBirthdayToday(c.dob) && (
                           <div className="mb-2 rounded-md bg-pink-100 border border-pink-300 px-3 py-2 text-sm font-semibold text-pink-700">
                              🎉 Today is {c.name ? `${c.name}'s Birthday!` : "this child's Birthday!"}
@@ -905,6 +941,17 @@ function BillingPage() {
                           max={new Date().toISOString().slice(0, 10)}
                         />
                         {childDobError && <p className="mt-1 text-xs text-red-500">{childDobError}</p>}
+                        {age !== null && (
+                          <span
+                            className={`mt-1 inline-flex items-center gap-1 px-1.5 py-1 rounded-full text-[10px] font-medium ${
+                              age < 3
+                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                                : "bg-primary/15 text-primary"
+                            }`}
+                          >
+                            {age}y
+                          </span>
+                        )}
                       </div>
                     <div className="col-span-2">
                       <select
@@ -917,19 +964,45 @@ function BillingPage() {
                         <option value="not_specified">Not Specified</option>
                       </select>
                     </div>
-                    <div className="col-span-1 text-sm text-center">
-                      {age !== null ? (
-                        <span
-                          className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-full text-[10px] font-medium ${
-                            age < 3
-                              ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-                              : "bg-primary/15 text-primary"
+                    <div className="col-span-3">
+                      <div className="flex items-stretch gap-1.5">
+                        <button
+                          type="button"
+                          aria-pressed={c.ageCategory === "above_3"}
+                          onClick={() => {
+                            updateChild(i, { ageCategory: "above_3" });
+                            setErrors((prev) => ({ ...prev, [`child-${i}-ageCategory`]: "" }));
+                          }}
+                          className={`flex-1 min-w-0 rounded-md border px-2 py-2 text-xs font-semibold text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
+                            c.ageCategory === "above_3"
+                              ? "border-blue-600 bg-blue-600 text-white shadow-md ring-2 ring-blue-200"
+                              : `bg-white text-foreground hover:border-primary/50 hover:bg-secondary/40 ${
+                                  childAgeCategoryError ? "border-red-500" : "border-input"
+                                }`
                           }`}
                         >
-                          {age}y
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
+                          Above 3y
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={c.ageCategory === "below_3"}
+                          onClick={() => {
+                            updateChild(i, { ageCategory: "below_3" });
+                            setErrors((prev) => ({ ...prev, [`child-${i}-ageCategory`]: "" }));
+                          }}
+                          className={`flex-1 min-w-0 rounded-md border px-2 py-2 text-xs font-semibold text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
+                            c.ageCategory === "below_3"
+                              ? "border-blue-600 bg-blue-600 text-white shadow-md ring-2 ring-blue-200"
+                              : `bg-white text-foreground hover:border-primary/50 hover:bg-secondary/40 ${
+                                  childAgeCategoryError ? "border-red-500" : "border-input"
+                                }`
+                          }`}
+                        >
+                          Below 3y
+                        </button>
+                      </div>
+                      {childAgeCategoryError && (
+                        <p className="mt-1 text-[10px] text-red-500">{childAgeCategoryError}</p>
                       )}
                     </div>
                     <div className="col-span-2 flex items-center justify-center gap-1.5">
