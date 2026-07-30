@@ -1,6 +1,6 @@
 {
   "name": "crazy_kids",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Crazy Kids POS",
   "main": "electron/main.js",
   "author": "Sosiyo",
@@ -21,6 +21,13 @@
   "build": {
     "appId": "com.sosiyo.pos",
     "productName": "Crazy Kids POS",
+
+    "publish": [
+    {
+      "provider": "generic",
+      "url": "https://pos.sosiyo.com/updates"
+    }
+  ],
 
     "directories": {
       "output": "dist"
