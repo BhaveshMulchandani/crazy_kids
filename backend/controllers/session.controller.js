@@ -45,7 +45,7 @@ const { createMembership, refreshStatus } = require('./membership.controller');
 const { calculateInvoiceCharges, dayName } = require('../services/billing.service');
 const Notification = require('../models/notification.model');
 const { getNextFormattedNumber } = require('../services/counter.service');
-const { buildCustomerNameOr } = require('../utils/customerSearch');
+const { buildCustomerNameOr, escapeRegex } = require('../utils/customerSearch');
 const { getDisplayName } = require('../utils/customerDisplay');
 
 // dob is optional, so two same-named children without a DOB on file are
@@ -993,6 +993,7 @@ const searchBillingCustomer = async (req, res) => {
     }
 
     const trimmedQuery = q.trim();
+    const escapedQuery = escapeRegex(trimmedQuery);
     const matches = await sessionmodel
       .find({
         status: {
@@ -1006,9 +1007,17 @@ const searchBillingCustomer = async (req, res) => {
           {
             sessionNumber: trimmedQuery,
           },
+          // A group booking's own name is only mirrored onto children[0].name
+          // (matched above via buildCustomerNameOr) as a display-fallback
+          // placeholder — matching the source field directly too so a group
+          // booking is searchable by Representative Child Name exactly like
+          // an individual booking is by child name.
+          {
+            "groupBooking.representativeChildName": { $regex: `^${escapedQuery}$`, $options: "i" },
+          },
         ],
       })
-      .select("_id sessionNumber parentName mobileNumber area city bandNumber children reference notes createdAt")
+      .select("_id sessionNumber parentName mobileNumber area city bandNumber children groupBooking reference notes createdAt")
       .sort({ createdAt: -1 });
 
     const mobileNumbers = [...new Set(matches.map((session) => session.mobileNumber))];

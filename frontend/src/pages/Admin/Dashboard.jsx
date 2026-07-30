@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Tag,
   Percent,
+  CalendarCheck,
 } from "lucide-react";
 import {
   LineChart,
@@ -175,11 +176,12 @@ export default function Dashboard() {
       {membershipAnalytics && <>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4 lg:gap-5">
           <StatCard label="Memberships Sold" value={membershipAnalytics.totalSold} icon={Users} accent="oklch(0.58 0.21 260)" />
+          <StatCard label="Memberships Sold in Last 30 Days" value={membershipAnalytics.soldLast30Days} hint="Rolling 30-day count" icon={CalendarCheck} accent="oklch(0.72 0.16 200)" />
           <StatCard label="Active Memberships" value={membershipAnalytics.active} hint={`${membershipAnalytics.expired} expired`} icon={Timer} accent="oklch(0.65 0.18 145)" />
           <StatCard label="Membership Revenue" value={`₹${Number(membershipAnalytics.revenue).toLocaleString()}`} icon={IndianRupee} accent="oklch(0.78 0.17 75)" />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
-          <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p><p className="mt-1 text-sm text-muted-foreground">{membershipAnalytics.soldLast30Days} memberships sold in the last 30 days.</p></div>
+          <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p></div>
           <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Recently purchased memberships</h3><div className="mt-2 space-y-1 text-sm">{membershipAnalytics.recent.slice(0, 3).map((item) => <div key={item._id} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5"><span className="min-w-0 truncate">{getDisplayName({ parentName: item.customer?.parentName, children: item.registeredChildren })} · {item.planName}</span><span className="text-muted-foreground shrink-0">{new Date(item.purchaseDate).toLocaleDateString()}</span></div>)}{membershipAnalytics.recent.length === 0 && <span className="text-muted-foreground">No memberships purchased yet.</span>}</div></div>
         </div>
       </>}

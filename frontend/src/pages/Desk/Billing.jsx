@@ -48,19 +48,45 @@ const ageInYears = (dob) => {
   return age;
 };
 
-const calculateEstimatedSessionCharge = (children, pricingSettings) => {
+const getTodayDayName = () =>
+  new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(new Date());
+
+// Special Day Pricing (e.g. "Wow Wednesday") replaces the first-hour/
+// extension rate for EVERY child that day, above-3 and below-3 alike —
+// mirrors billing.service.js's specialDayMatches/rateFor exactly, so the
+// booking-time estimate never drifts from what checkout will actually
+// charge. Only a special_pricing offer can ever trigger this — discount,
+// flat_discount, and membership offers are deliberately never looked at
+// here, per the existing "Paid" auto-fill scope.
+const getSpecialDayRates = (offerId, offerList) => {
+  if (!offerId || offerId === "none") return null;
+  const offer = (offerList || []).find((o) => o.id === offerId);
+  if (!offer || offer.type !== "special_pricing") return null;
+  if (String(offer.rules?.day || "").toLowerCase() !== getTodayDayName().toLowerCase()) return null;
+  return {
+    firstHourPrice: Number(offer.rules?.firstHourPrice || 0),
+    nextHourPrice: Number(offer.rules?.nextHourPrice || 0),
+  };
+};
+
+const calculateEstimatedSessionCharge = (children, pricingSettings, specialDayRates) => {
   const subtotal = (children || []).reduce((total, child) => {
     if (!child?.name?.trim()) return total;
 
     // Pricing bracket comes from the operator-selected Age Category, not
-    // DOB — mirrors billing.service.js.
+    // DOB — mirrors billing.service.js. Special Day Pricing, when active,
+    // overrides both brackets with the same rate (see getSpecialDayRates).
     const isUnder3 = child?.ageCategory === "below_3";
-    const firstHourRate = isUnder3
-      ? Number(pricingSettings?.firstHourUnder3 ?? 0)
-      : Number(pricingSettings?.firstHourAbove3 ?? 0);
-    const extensionRate = isUnder3
-      ? Number(pricingSettings?.extensionUnder3 ?? 0)
-      : Number(pricingSettings?.extensionAbove3 ?? 0);
+    const firstHourRate = specialDayRates
+      ? specialDayRates.firstHourPrice
+      : isUnder3
+        ? Number(pricingSettings?.firstHourUnder3 ?? 0)
+        : Number(pricingSettings?.firstHourAbove3 ?? 0);
+    const extensionRate = specialDayRates
+      ? specialDayRates.nextHourPrice
+      : isUnder3
+        ? Number(pricingSettings?.extensionUnder3 ?? 0)
+        : Number(pricingSettings?.extensionAbove3 ?? 0);
     const hours = 1;
 
     return total + firstHourRate + Math.max(hours - 1, 0) * extensionRate;
@@ -81,7 +107,7 @@ const calculateEstimatedSessionCharge = (children, pricingSettings) => {
 // without the operator having to remember to pick it manually. Mirrors the
 // day-match check billing.service.js runs at checkout.
 const getDayOfferId = (offerList) => {
-  const today = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(new Date());
+  const today = getTodayDayName();
   const dayOffer = (offerList || []).find(
     (offer) =>
       offer.active !== false &&
@@ -95,11 +121,15 @@ const getDayOfferId = (offerList) => {
 // above/below-3 headcount (no per-child names/DOB collected for a group), at
 // the booking's starting 1 hour. Socks are a single group-wide headcount too
 // (not a per-child opt-in) — same existing socksCost rate as normal bookings.
-const calculateEstimatedGroupCharge = (group, pricingSettings) => {
+const calculateEstimatedGroupCharge = (group, pricingSettings, specialDayRates) => {
   const aboveCount = Number(group?.aboveThreeCount) || 0;
   const belowCount = Number(group?.belowThreeCount) || 0;
-  const firstHourAbove3 = Number(pricingSettings?.firstHourAbove3 ?? 0);
-  const firstHourUnder3 = Number(pricingSettings?.firstHourUnder3 ?? 0);
+  const firstHourAbove3 = specialDayRates
+    ? specialDayRates.firstHourPrice
+    : Number(pricingSettings?.firstHourAbove3 ?? 0);
+  const firstHourUnder3 = specialDayRates
+    ? specialDayRates.firstHourPrice
+    : Number(pricingSettings?.firstHourUnder3 ?? 0);
 
   const socksQty = Number(group?.socksRequired) || 0;
   const socksTotal = socksQty * Number(pricingSettings?.socksCost ?? 0);
@@ -606,6 +636,11 @@ function BillingPage() {
   };
 
   const validChildren = children.filter((c) => c.name.trim());
+  // Special Day Pricing never applies to a membership booking — a
+  // membership always covers the session outright, so its own flow (offer
+  // dropdown is already disabled once a membership is loaded) is left
+  // completely untouched here.
+  const specialDayRates = membership ? null : getSpecialDayRates(offerId, offers);
   const estimatedCharge = isGroupBooking
     ? calculateEstimatedGroupCharge(
         {
@@ -614,8 +649,9 @@ function BillingPage() {
           socksRequired: groupSocksRequired,
         },
         pricingSettings,
+        specialDayRates,
       )
-    : calculateEstimatedSessionCharge(validChildren, pricingSettings);
+    : calculateEstimatedSessionCharge(validChildren, pricingSettings, specialDayRates);
 
   // Booking-time "Paid" amount must reflect ONLY the initial Above/Below 3
   // Years session charges — never socks, cafe, extensions, or anything from
