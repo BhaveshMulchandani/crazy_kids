@@ -153,6 +153,12 @@ const sessionSchema = new mongoose.Schema(
     // headcount instead of iterating individual children.
     groupBooking: {
       isGroup: { type: Boolean, default: false },
+      // A group booking has no per-child DOBs to auto-detect a birthday
+      // from (see isBirthdayToday elsewhere), so "Birthday Group Booking" is
+      // an explicit operator selection instead. Pricing/flow is identical to
+      // a normal group booking — this only gates the loyalty-points
+      // exemption (see session.controller.js:completesession).
+      isBirthday: { type: Boolean, default: false },
       representativeChildName: { type: String, default: "", trim: true },
       totalChildren: { type: Number, default: 0, min: 0 },
       aboveThreeCount: { type: Number, default: 0, min: 0 },

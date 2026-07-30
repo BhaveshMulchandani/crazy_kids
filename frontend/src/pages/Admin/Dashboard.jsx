@@ -127,6 +127,7 @@ export default function Dashboard() {
   const areaRevenueData = (stats.revenueByArea || []).map((a) => ({
     name: a.area,
     revenue: a.revenue,
+    customerCount: a.customerCount || 0,
   }));
 
   const recentTransactions = stats.recentTransactions || [];
@@ -178,7 +179,7 @@ export default function Dashboard() {
           <StatCard label="Membership Revenue" value={`₹${Number(membershipAnalytics.revenue).toLocaleString()}`} icon={IndianRupee} accent="oklch(0.78 0.17 75)" />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
-          <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p><p className="mt-1 text-sm text-muted-foreground">{membershipAnalytics.expiringSoon.length} memberships expire within 7 days.</p></div>
+          <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Membership overview</h3><p className="mt-2 text-sm text-muted-foreground">Most popular plan: <span className="font-medium text-foreground">{membershipAnalytics.popularPlan?._id || "No sales yet"}</span></p><p className="mt-1 text-sm text-muted-foreground">{membershipAnalytics.soldLast30Days} memberships sold in the last 30 days.</p></div>
           <div className="surface-card p-5 min-w-0"><h3 className="font-semibold">Recently purchased memberships</h3><div className="mt-2 space-y-1 text-sm">{membershipAnalytics.recent.slice(0, 3).map((item) => <div key={item._id} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5"><span className="min-w-0 truncate">{getDisplayName({ parentName: item.customer?.parentName, children: item.registeredChildren })} · {item.planName}</span><span className="text-muted-foreground shrink-0">{new Date(item.purchaseDate).toLocaleDateString()}</span></div>)}{membershipAnalytics.recent.length === 0 && <span className="text-muted-foreground">No memberships purchased yet.</span>}</div></div>
         </div>
       </>}
@@ -468,7 +469,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h3 className="font-semibold">Revenue by area</h3>
-            <p className="text-xs text-muted-foreground">All-time revenue per play area</p>
+            <p className="text-xs text-muted-foreground">All-time revenue and customers per play area</p>
           </div>
         </div>
         <div className="h-72">
@@ -481,12 +482,19 @@ export default function Dashboard() {
               <BarChart data={areaRevenueData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                 <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
-                <YAxis stroke="#94a3b8" fontSize={12} />
+                <YAxis yAxisId="revenue" stroke="#94a3b8" fontSize={12} />
+                <YAxis yAxisId="customers" orientation="right" stroke="#94a3b8" fontSize={12} allowDecimals={false} />
                 <Tooltip
-                  formatter={(value) => [`₹${Number(value).toLocaleString()}`, "Revenue"]}
+                  formatter={(value, name) =>
+                    name === "Revenue"
+                      ? [`₹${Number(value).toLocaleString()}`, "Revenue"]
+                      : [Number(value).toLocaleString(), "Customers"]
+                  }
                   contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0" }}
                 />
-                <Bar dataKey="revenue" radius={[8, 8, 0, 0]} fill="#3b82f6" />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar yAxisId="revenue" dataKey="revenue" name="Revenue" radius={[8, 8, 0, 0]} fill="#3b82f6" />
+                <Bar yAxisId="customers" dataKey="customerCount" name="Customers" radius={[8, 8, 0, 0]} fill="#22c55e" />
               </BarChart>
             </ResponsiveContainer>
           )}

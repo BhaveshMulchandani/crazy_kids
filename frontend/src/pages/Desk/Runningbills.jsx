@@ -513,7 +513,10 @@ const BillCard = ({
   const secs = elapsedSeconds(bill);
   const children = bill.children ?? [];
   const birthdayChildren = children.filter((child) => isBirthdayChild(child));
-  const hasBirthday = birthdayChildren.length > 0;
+  // A Birthday Group Booking has no per-child dob to detect a birthday from
+  // (see session.model.js groupBooking.isBirthday) — it's an explicit
+  // operator selection instead, but reuses this exact same highlight.
+  const hasBirthday = birthdayChildren.length > 0 || Boolean(bill?.groupBooking?.isBirthday);
   const paused = bill.status === "paused";
   const sessionCharge = calculateSessionCharge(bill, pricingSettings);
   const foodCharge = calculateFoodCharge({

@@ -53,6 +53,7 @@ const invoiceSchema = new mongoose.Schema(
     // session.model.js) — kept alongside `children`'s two group-summary
     // rows purely as structured metadata for reporting/display.
     groupBooking: {
+      isBirthday: { type: Boolean, default: false },
       representativeChildName: { type: String, default: "" },
       totalChildren: { type: Number, default: 0 },
       aboveThreeCount: { type: Number, default: 0 },

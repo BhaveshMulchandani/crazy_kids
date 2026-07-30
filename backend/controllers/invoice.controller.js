@@ -8,13 +8,6 @@ const whatsappService = require("../services/whatsapp.service");
 const { getNextFormattedNumber } = require("../services/counter.service");
 const { getDisplayName } = require("../utils/customerDisplay");
 
-const isBirthdayToday = (dob) => {
-  if (!dob) return false;
-  const today = new Date();
-  const birthDate = new Date(dob);
-  return today.getDate() === birthDate.getDate() && today.getMonth() === birthDate.getMonth();
-};
-
 // countDocuments()+1 is not concurrency-safe (two concurrent invoice
 // creations can read the same count before either write lands) and would
 // also collide with session.controller.js:completesession, which shares
@@ -41,11 +34,12 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
     ? Math.max(0, Math.round((endTime.getTime() - startTime.getTime()) / 60000))
     : 0;
   const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
-  // Same birthday exemption as session.controller.js:completesession — no
-  // loyalty points at all when any child in the session has a birthday
-  // today, regardless of which route ends up creating the invoice.
-  const hasBirthdayChild = (session.children || []).some((child) => isBirthdayToday(child.dob));
-  const loyaltyPoints = hasBirthdayChild ? 0 : Math.floor(Number(calculation.grandTotal || 0) / 100) * pointsPer100;
+  // Same exemption rules as session.controller.js:completesession —
+  // birthday sessions earn points normally; only a membership-covered
+  // session or a "Birthday Group Booking" are exempt — regardless of which
+  // route ends up creating the invoice.
+  const loyaltyPointsExempt = calculation.membershipApplied || Boolean(session.groupBooking?.isBirthday);
+  const loyaltyPoints = loyaltyPointsExempt ? 0 : Math.floor(Number(calculation.grandTotal || 0) / 100) * pointsPer100;
 
   return {
     customer: {

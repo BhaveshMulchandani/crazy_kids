@@ -3,7 +3,8 @@ import {
   Timer,
   UtensilsCrossed,
   Sparkles,
-  Coffee
+  Coffee,
+  IdCard,
 } from "lucide-react";
 
 import { NavLink,useNavigate } from "react-router-dom";
@@ -12,6 +13,7 @@ import axios from "axios";
 const navItems = [
   { label: "Billing", icon: Receipt, path: "/desk/billing" },
   {label: "Running Bills", icon:Timer,path:"/desk/runningbills"},
+  { label: "Memberships", icon: IdCard, path: "/desk/memberships" },
   { label: "Cafe POS", icon: Coffee, path: "/desk/cafepos" },
   { label: "Cafe Menu", icon: UtensilsCrossed, path: "/desk/cafemenu" },
 ];

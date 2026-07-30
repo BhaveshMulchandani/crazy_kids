@@ -118,7 +118,16 @@ const dashboardStats = async (req, res) => {
               { $limit: 6 },
             ],
             revenueByArea: [
-              { $group: { _id: { $ifNull: ["$customer.area", ""] }, revenue: { $sum: "$charges.grandTotal" } } },
+              {
+                $group: {
+                  _id: { $ifNull: ["$customer.area", ""] },
+                  revenue: { $sum: "$charges.grandTotal" },
+                  // Distinct customers (by mobile number), not invoice count —
+                  // a repeat customer from the same area is counted once.
+                  customers: { $addToSet: "$customer.mobileNumber" },
+                },
+              },
+              { $project: { revenue: 1, customerCount: { $size: "$customers" } } },
               { $sort: { revenue: -1 } },
               { $limit: 10 },
             ],
@@ -191,6 +200,7 @@ const dashboardStats = async (req, res) => {
     const revenueByArea = facets.revenueByArea.map((row) => ({
       area: row._id?.trim() ? row._id.trim() : "Unknown",
       revenue: row.revenue || 0,
+      customerCount: row.customerCount || 0,
     }));
 
     const offerTotals = facets.offerTotals[0] || { usageCount: 0, totalDiscount: 0 };

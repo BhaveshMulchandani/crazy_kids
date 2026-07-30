@@ -218,9 +218,9 @@ function BillingPage() {
   const [paymentBreakdown, setPaymentBreakdown] = useState([
     { method: "cash", amount: "" },
   ]);
-  const [amountPaid, setAmountPaid] = useState("");
   const [errors, setErrors] = useState({});
   const [isGroupBooking, setIsGroupBooking] = useState(false);
+  const [isBirthdayGroupBooking, setIsBirthdayGroupBooking] = useState(false);
   const [groupRepresentativeChildName, setGroupRepresentativeChildName] = useState("");
   const [groupTotalChildren, setGroupTotalChildren] = useState("");
   const [groupAboveThreeCount, setGroupAboveThreeCount] = useState("");
@@ -455,11 +455,9 @@ function BillingPage() {
       }
     }
 
-    if (paymentStatus === "paid") {
-      if (!amountPaid || Number(amountPaid) <= 0) {
-        nextErrors.amountPaid = "Amount paid is required";
-      }
-    }
+    // "Paid" no longer needs its own validation — the amount is always
+    // auto-calculated from the session charges (see sessionOnlyAmount
+    // below), never typed in, so it can't be missing/invalid.
 
     if (paymentStatus === "partially_paid") {
       const totalPaid = paymentBreakdown.reduce(
@@ -488,10 +486,12 @@ function BillingPage() {
     try {
       // `estimatedCharge` already branches on isGroupBooking (group headcount
       // vs. per-child pricing) — reused here so paidAmount/balance always
-      // match whatever the operator saw on screen before submitting.
+      // match whatever the operator saw on screen before submitting. "Paid"
+      // always saves the session-only amount (see sessionOnlyAmount above),
+      // never a manually-typed value.
       const paidAmount =
         paymentStatus === "paid"
-          ? Number(amountPaid) || estimatedCharge.total
+          ? sessionOnlyAmount
           : paymentStatus === "partially_paid"
             ? paymentBreakdown.reduce(
                 (sum, entry) => sum + (Number(entry.amount) || 0),
@@ -532,6 +532,7 @@ function BillingPage() {
             ...sharedPayload,
             isGroupBooking: true,
             groupBooking: {
+              isBirthday: isBirthdayGroupBooking,
               representativeChildName: groupRepresentativeChildName.trim(),
               totalChildren: Number(groupTotalChildren),
               aboveThreeCount: Number(groupAboveThreeCount),
@@ -594,9 +595,9 @@ function BillingPage() {
     setPaymentStatus("pending");
     setPaymentMethod("cash");
     setPaymentBreakdown([{ method: "cash", amount: "" }]);
-    setAmountPaid("");
     setErrors({});
     setIsGroupBooking(false);
+    setIsBirthdayGroupBooking(false);
     setGroupRepresentativeChildName("");
     setGroupTotalChildren("");
     setGroupAboveThreeCount("");
@@ -616,6 +617,21 @@ function BillingPage() {
       )
     : calculateEstimatedSessionCharge(validChildren, pricingSettings);
 
+  // Booking-time "Paid" amount must reflect ONLY the initial Above/Below 3
+  // Years session charges — never socks, cafe, extensions, or anything from
+  // the running/checkout flow (those stay entirely as-is, computed live in
+  // Runningbills.jsx). `estimatedCharge.total` already includes socksTotal
+  // for both the individual and group branches, so subtracting it back out
+  // leaves exactly the session-only amount for either booking type.
+  //
+  // Derived directly during render (not via a state-syncing effect) so the
+  // "Paid" Amount field is always exactly the current session-only amount —
+  // the operator never types it in, and it can never go stale.
+  const sessionOnlyAmount = Math.max(
+    Math.round((estimatedCharge.total - estimatedCharge.socksTotal) * 100) / 100,
+    0,
+  );
+
   return (
     <div className="w-full max-w-[1920px] mx-auto space-y-6 px-6 py-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -630,6 +646,7 @@ function BillingPage() {
           aria-pressed={isGroupBooking}
           onClick={() => {
             setIsGroupBooking(!isGroupBooking);
+            setIsBirthdayGroupBooking(false);
             setErrors({});
           }}
           className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 ${
@@ -800,6 +817,37 @@ function BillingPage() {
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div className="space-y-2 min-w-0">
+                  <Label>Group Booking Type</Label>
+                  <div className="flex items-stretch gap-1.5">
+                    <button
+                      type="button"
+                      aria-pressed={!isBirthdayGroupBooking}
+                      onClick={() => setIsBirthdayGroupBooking(false)}
+                      className={`flex-1 min-w-0 rounded-md border px-3 py-2 text-xs font-semibold text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
+                        !isBirthdayGroupBooking
+                          ? "border-blue-600 bg-blue-600 text-white shadow-md ring-2 ring-blue-200"
+                          : "border-input bg-white text-foreground hover:border-primary/50 hover:bg-secondary/40"
+                      }`}
+                    >
+                      Normal Group Booking
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={isBirthdayGroupBooking}
+                      onClick={() => setIsBirthdayGroupBooking(true)}
+                      className={`flex-1 min-w-0 rounded-md border px-3 py-2 text-xs font-semibold text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
+                        isBirthdayGroupBooking
+                          ? "border-blue-600 bg-blue-600 text-white shadow-md ring-2 ring-blue-200"
+                          : "border-input bg-white text-foreground hover:border-primary/50 hover:bg-secondary/40"
+                      }`}
+                    >
+                      🎂 Birthday Group Booking
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="space-y-2 min-w-0">
                   <Label>Representative Child Name{parentName.trim() ? " (optional)" : " *"}</Label>
                   <Input
                     value={groupRepresentativeChildName}
@@ -934,8 +982,25 @@ function BillingPage() {
                           type="date"
                           value={c.dob}
                           onChange={(e) => {
-                            updateChild(i, { dob: e.target.value });
-                            setErrors((prev) => ({ ...prev, [`child-${i}-dob`]: "" }));
+                            const newDob = e.target.value;
+                            const patch = { dob: newDob };
+                            // Auto-pick the matching Age Category from the
+                            // entered DOB — still just a starting value, the
+                            // operator can click Above/Below 3y afterward to
+                            // override it. Clearing the DOB leaves whatever
+                            // Age Category is currently selected untouched.
+                            if (newDob) {
+                              const computedAge = ageInYears(newDob);
+                              if (computedAge !== null) {
+                                patch.ageCategory = computedAge < 3 ? "below_3" : "above_3";
+                              }
+                            }
+                            updateChild(i, patch);
+                            setErrors((prev) => ({
+                              ...prev,
+                              [`child-${i}-dob`]: "",
+                              ...(patch.ageCategory ? { [`child-${i}-ageCategory`]: "" } : {}),
+                            }));
                           }}
                           className={childDobError ? "border-red-500" : ""}
                           max={new Date().toISOString().slice(0, 10)}
@@ -1108,15 +1173,14 @@ function BillingPage() {
                 <Input
                   type="number"
                   min="0"
-                  value={amountPaid}
-                  onChange={(e) => {
-                    setAmountPaid(e.target.value);
-                    setErrors((prev) => ({ ...prev, amountPaid: "" }));
-                  }}
-                  className={errors.amountPaid ? "border-red-500" : ""}
-                  placeholder={estimatedCharge.total.toString()}
+                  value={sessionOnlyAmount}
+                  disabled
+                  readOnly
+                  className="bg-secondary/30 text-black"
                 />
-                {errors.amountPaid && <p className="text-xs text-red-500">{errors.amountPaid}</p>}
+                <p className="text-xs text-muted-foreground">
+                  Auto-calculated from session charges (excludes cafe, socks, and extensions)
+                </p>
               </div>
             </div>
           )}

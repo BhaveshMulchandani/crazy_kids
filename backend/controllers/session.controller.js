@@ -165,6 +165,10 @@ const createsession = async (
 
       groupBookingData = {
         isGroup: true,
+        // "Birthday Group Booking" — same fields/flow as a normal group
+        // booking, this flag only gates the loyalty-points exemption at
+        // checkout (see completesession below).
+        isBirthday: Boolean(groupBooking?.isBirthday),
         representativeChildName,
         totalChildren,
         aboveThreeCount,
@@ -731,14 +735,22 @@ const extendsession = async (req, res) => {
       addedAt: new Date(),
     });
 
-    session.scheduledEndTime = new Date(
-      session.scheduledEndTime.getTime() +
-      60 * 60 * 1000
-    );
+    // Extending an already-overdue session must "restart" its timer — 1 hour
+    // from right now — rather than tacking 1 hour onto a scheduledEndTime
+    // that's already in the past, which could still leave it in the past
+    // (e.g. 90 minutes overdue) and keep showing "Session Over" even after a
+    // successful extend. A session that isn't overdue yet keeps the existing
+    // behaviour unchanged: 1 hour added onto its current scheduledEndTime.
+    const now = new Date();
+    const sessionBaseTime = session.scheduledEndTime && session.scheduledEndTime > now
+      ? session.scheduledEndTime
+      : now;
+    session.scheduledEndTime = new Date(sessionBaseTime.getTime() + 60 * 60 * 1000);
 
     session.children.forEach((child) => {
       if (child.timer.scheduledEndTime) {
-        child.timer.scheduledEndTime = new Date(child.timer.scheduledEndTime.getTime() + 60 * 60 * 1000);
+        const childBaseTime = child.timer.scheduledEndTime > now ? child.timer.scheduledEndTime : now;
+        child.timer.scheduledEndTime = new Date(childBaseTime.getTime() + 60 * 60 * 1000);
       }
     });
 
@@ -808,11 +820,15 @@ const completesession = async (req, res) => {
       const startTime = session.startTime ? new Date(session.startTime) : null;
       const actualDurationMinutes = startTime ? Math.max(0, Math.round((session.actualEndTime - startTime) / 60000)) : 0;
       const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
-      // No loyalty points at all on a session where any child's birthday
-      // falls on the session date — the whole bill is exempt, not just that
-      // child's share.
-      const hasBirthdayChild = (session.children || []).some((child) => isBirthdayToday(child.dob));
-      const loyaltyPoints = hasBirthdayChild ? 0 : Math.floor(calculation.grandTotal / 100) * pointsPer100;
+      // Birthday sessions (a child's dob matches today) earn loyalty points
+      // normally like any other session. Only two cases are exempt: a
+      // membership-covered session (already prepaid, no cash session charge
+      // to earn points on) and a "Birthday Group Booking" (see
+      // groupBooking.isBirthday in session.model.js — group bookings have no
+      // per-child dob to derive a birthday from, so this is the explicit
+      // operator-selected equivalent).
+      const loyaltyPointsExempt = calculation.membershipApplied || Boolean(session.groupBooking?.isBirthday);
+      const loyaltyPoints = loyaltyPointsExempt ? 0 : Math.floor(calculation.grandTotal / 100) * pointsPer100;
       // Date.now() collides if two sessions complete within the same
       // millisecond, crashing checkout on the unique invoiceNumber index.
       // Shares the same atomic "invoiceNumber" sequence as

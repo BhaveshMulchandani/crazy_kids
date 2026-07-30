@@ -4,6 +4,7 @@ import Desklayout from "./components/Layout/Desklayout";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Admin/Dashboard";
+import MembershipDashboard from "./pages/Desk/MembershipDashboard";
 import Billing from "./pages/Desk/Billing";
 import Cafepos from "./pages/Desk/Cafepos";
 import Customers from "./pages/Admin/Customers";
@@ -32,6 +33,7 @@ const App = () => {
       <Route path="/desk" element={<Desklayout />}>
       <Route path="billing" element={<Billing/>} />
       <Route path="runningbills" element={<Runningbills/>} />
+      <Route path="memberships" element={<MembershipDashboard/>}/>
       <Route path="cafepos" element={<Cafepos/>}/>
       <Route path="cafemenu" element={<Cafemenu/>}/>
       </Route>
