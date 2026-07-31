@@ -377,8 +377,10 @@ const yearRange = (year) => {
 // scanned, and only one row per unique customer comes back out. Shared by
 // both the Monthly and Yearly reports (getMonthlyReportData / below) — only
 // the date range differs between them, every field/metric is identical.
+const REPORT_PAYMENT_METHOD_LABELS = { cash: "Cash", upi: "UPI", card: "Card" };
+
 const getCustomerReportDataForRange = async (start, end) => {
-  const [visitAgg, invoiceAgg, cityAgg, areaAgg] = await Promise.all([
+  const [visitAgg, invoiceAgg, cityAgg, areaAgg, paymentMethodAgg, pendingAgg] = await Promise.all([
     sessionmodel.aggregate([
       { $match: { status: "completed", actualEndTime: { $gte: start, $lt: end } } },
       {
@@ -423,6 +425,14 @@ const getCustomerReportDataForRange = async (start, end) => {
           membershipApplied: { $last: "$membership.applied" },
           membershipName: { $last: "$membership.planName" },
           childNameLists: { $push: "$children.name" },
+          // Payment settlement — carried on the invoice as of completion
+          // time (see session.controller.js completesession), not
+          // re-derived here. amountPaid/pendingAmount are summed like the
+          // other money fields; paymentBreakdownLists is flattened in JS
+          // below to build a human-readable "paid via" label per customer.
+          amountPaid: { $sum: "$payment.amountPaid" },
+          pendingAmount: { $sum: "$payment.pendingAmount" },
+          paymentBreakdownLists: { $push: "$payment.breakdown" },
         },
       },
       {
@@ -439,6 +449,9 @@ const getCustomerReportDataForRange = async (start, end) => {
           offerName: 1,
           membershipApplied: 1,
           membershipName: 1,
+          amountPaid: 1,
+          pendingAmount: 1,
+          paymentBreakdownLists: 1,
           childNames: {
             $reduce: {
               input: "$childNameLists",
@@ -469,6 +482,33 @@ const getCustomerReportDataForRange = async (start, end) => {
       },
       { $sort: { revenue: -1 } },
     ]),
+    // Revenue actually collected in the period, grouped by how it was
+    // paid — additive alongside revenueByCity/revenueByArea above, not a
+    // replacement for totalRevenue (which stays "billed" regardless of
+    // payment status, exactly as before).
+    Invoice.aggregate([
+      { $match: { createdAt: { $gte: start, $lt: end } } },
+      { $unwind: "$payment.breakdown" },
+      { $match: { "payment.breakdown.amount": { $gt: 0 } } },
+      {
+        $group: {
+          _id: { $ifNull: ["$payment.breakdown.method", "cash"] },
+          amount: { $sum: "$payment.breakdown.amount" },
+        },
+      },
+      { $sort: { amount: -1 } },
+    ]),
+    // Invoices from the period still carrying an unsettled balance.
+    Invoice.aggregate([
+      { $match: { createdAt: { $gte: start, $lt: end }, "payment.pendingAmount": { $gt: 0 } } },
+      {
+        $group: {
+          _id: null,
+          totalPendingAmount: { $sum: "$payment.pendingAmount" },
+          pendingInvoiceCount: { $sum: 1 },
+        },
+      },
+    ]),
   ]);
 
   const visitMap = new Map(visitAgg.map((row) => [row._id, row]));
@@ -487,6 +527,19 @@ const getCustomerReportDataForRange = async (start, end) => {
       ? invoiceRow?.membershipName || "Membership"
       : invoiceRow?.offerName || "-";
 
+    // Method(s) that actually settled this customer's invoices in the
+    // period — flattened across every invoice's payment.breakdown (each
+    // invoice has its own array), deduped, and labeled. Empty when nothing
+    // has been collected yet (fully pending).
+    const paymentMethodsUsed = [
+      ...new Set(
+        (invoiceRow?.paymentBreakdownLists || [])
+          .flat()
+          .filter((entry) => Number(entry?.amount) > 0)
+          .map((entry) => REPORT_PAYMENT_METHOD_LABELS[entry.method] || entry.method)
+      ),
+    ];
+
     return {
       mobileNumber,
       customerId: invoiceRow?.customerId || visitRow?.customerId || "-",
@@ -501,6 +554,9 @@ const getCustomerReportDataForRange = async (start, end) => {
       sessionTotal: invoiceRow?.sessionTotal || 0,
       cafeTotal: invoiceRow?.cafeTotal || 0,
       socksQty: invoiceRow?.socksQty || 0,
+      amountPaid: invoiceRow?.amountPaid || 0,
+      pendingAmount: invoiceRow?.pendingAmount || 0,
+      paymentMethod: paymentMethodsUsed.length > 0 ? paymentMethodsUsed.join(" + ") : "-",
     };
   });
 
@@ -514,6 +570,12 @@ const getCustomerReportDataForRange = async (start, end) => {
       acc.totalRevenueFromSessions += c.sessionTotal;
       acc.totalRevenueFromCafe += c.cafeTotal;
       acc.totalSocksIssued += c.socksQty;
+      // Additive only — totalRevenue above is unchanged ("billed" amount,
+      // regardless of payment status, same as before). These two just
+      // split that same figure into what's actually been collected vs.
+      // still outstanding.
+      acc.totalAmountCollected += c.amountPaid;
+      acc.totalPendingAmount += c.pendingAmount;
       return acc;
     },
     {
@@ -524,6 +586,8 @@ const getCustomerReportDataForRange = async (start, end) => {
       totalRevenueFromSessions: 0,
       totalRevenueFromCafe: 0,
       totalSocksIssued: 0,
+      totalAmountCollected: 0,
+      totalPendingAmount: 0,
     }
   );
 
@@ -537,7 +601,19 @@ const getCustomerReportDataForRange = async (start, end) => {
     revenue: row.revenue || 0,
   }));
 
-  return { customers, summary, revenueByCity, revenueByArea };
+  // Payment settlement breakdown — additive alongside revenueByCity/
+  // revenueByArea, not a substitute for any existing figure.
+  const paymentMethodBreakdown = paymentMethodAgg.map((row) => ({
+    method: REPORT_PAYMENT_METHOD_LABELS[row._id] || row._id || "Cash",
+    amount: row.amount || 0,
+  }));
+
+  const pendingPayments = {
+    totalAmount: pendingAgg[0]?.totalPendingAmount || 0,
+    invoiceCount: pendingAgg[0]?.pendingInvoiceCount || 0,
+  };
+
+  return { customers, summary, revenueByCity, revenueByArea, paymentMethodBreakdown, pendingPayments };
 };
 
 const getMonthlyReportData = async (month, year) => {
@@ -586,7 +662,7 @@ const formatGeneratedOn = (date) =>
 // same columns, same summary/revenue cards, same pagination; only the title
 // line, period label, and filename differ between the two callers below.
 const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, report }) => {
-  const { customers, summary, revenueByCity, revenueByArea } = report;
+  const { customers, summary, revenueByCity, revenueByArea, paymentMethodBreakdown, pendingPayments } = report;
 
     // Landscape — the report now carries 13 columns (area + city +
     // offer/membership + the session/cafe/socks breakdown added on top of
@@ -816,6 +892,21 @@ const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, repo
       ]);
       y = drawCardSection("Revenue By City", cityRows, y);
     }
+
+    // Payment settlement — additive card, same drawCardSection used for
+    // Revenue By Area/City above. Doesn't touch totalRevenue or any other
+    // existing figure, just breaks out collected-vs-pending and by which
+    // method the collected portion came in.
+    const settlementRows = [
+      ["Total Collected", `Rs. ${Number(summary.totalAmountCollected).toLocaleString("en-IN")}`],
+      ["Total Pending", `Rs. ${Number(summary.totalPendingAmount).toLocaleString("en-IN")}`],
+      ["Invoices With Pending Balance", String(pendingPayments.invoiceCount)],
+      ...paymentMethodBreakdown.map(({ method, amount }) => [
+        `Collected Via ${method}`,
+        `Rs. ${Number(amount).toLocaleString("en-IN")}`,
+      ]),
+    ];
+    y = drawCardSection("Payment Settlement", settlementRows, y);
 
     const pageRange = doc.bufferedPageRange();
     for (let i = 0; i < pageRange.count; i++) {

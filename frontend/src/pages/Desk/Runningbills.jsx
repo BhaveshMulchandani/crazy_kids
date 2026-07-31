@@ -207,6 +207,28 @@ const calculateSessionCharge = (bill, pricingSettings) => {
   };
 };
 
+const PAYMENT_METHOD_LABELS = { cash: "Cash", upi: "UPI", card: "Card" };
+
+// `paymentBreakdown` (set once at booking time — see Billing.jsx submit())
+// is the only record of which method(s) actually settled a bill: a single
+// entry for "paid", multiple for "partially_paid" (split payment), and
+// empty for "pending" (nothing collected yet, so there's nothing to show).
+// Read-only — this doesn't add or change how payment is captured, only
+// surfaces what's already stored.
+const formatPaymentMethodLabel = (bill) => {
+  const breakdown = Array.isArray(bill?.paymentBreakdown)
+    ? bill.paymentBreakdown.filter((entry) => Number(entry?.amount) > 0)
+    : [];
+  if (breakdown.length === 0) return null;
+  if (breakdown.length === 1) {
+    const method = breakdown[0]?.method || "cash";
+    return PAYMENT_METHOD_LABELS[method] || method;
+  }
+  return `Split Payment (${breakdown
+    .map((entry) => `${PAYMENT_METHOD_LABELS[entry.method] || entry.method} ${formatCurrency(entry.amount)}`)
+    .join(" + ")})`;
+};
+
 const getSessionPaymentSummary = (bill, sessionCharge) => {
   const paymentStatus = bill?.paymentStatus || "pending";
   const amountPaid = paymentStatus === "pending" ? 0 : Number(bill?.amountPaid || 0);
@@ -224,6 +246,7 @@ const getSessionPaymentSummary = (bill, sessionCharge) => {
         : paymentStatus === "partially_paid"
           ? "Partially Paid"
           : "Pending",
+    paymentMethodLabel: formatPaymentMethodLabel(bill),
   };
 };
 
@@ -725,6 +748,9 @@ const BillCard = ({
           <Row k="Amount Paid" v={formatCurrency(paymentSummary.amountPaid)} />
           <Row k="Pending Amount" v={formatCurrency(paymentSummary.pendingAmount)} />
           <Row k="Payment Status" v={paymentSummary.paymentStatusLabel} />
+          {paymentSummary.paymentMethodLabel && (
+            <Row k="Payment Completed Using" v={paymentSummary.paymentMethodLabel} />
+          )}
         </div>
       </div>
 
@@ -965,6 +991,9 @@ const CheckoutDialog = ({
             <Row k="Payment Status" v={paymentSummary.paymentStatusLabel} />
             <Row k="Amount Paid" v={formatCurrency(paymentSummary.amountPaid)} />
             <Row k="Pending Amount" v={formatCurrency(paymentSummary.pendingAmount)} />
+            {paymentSummary.paymentMethodLabel && (
+              <Row k="Payment Completed Using" v={paymentSummary.paymentMethodLabel} />
+            )}
             <Row k="Loyalty Points Earned" v={loyaltyPoints.toString()} />
           </div>
 
@@ -1049,7 +1078,7 @@ const InvoiceRow = ({ label, value, bold, muted, color }) => (
 );
 
 const invoiceThStyle = {
-  padding: "6px 8px",
+  padding: "5px 7px",
   textAlign: "left",
   fontSize: 10,
   fontWeight: 700,
@@ -1061,8 +1090,8 @@ const invoiceThStyle = {
 };
 
 const invoiceTdStyle = {
-  padding: "6px 8px",
-  fontSize: 12,
+  padding: "5px 7px",
+  fontSize: 11.5,
   color: INVOICE_TEXT,
   borderBottom: `1px solid ${INVOICE_BORDER}`,
 };
@@ -1194,6 +1223,14 @@ const generateInvoicePdfBlob = async () => {
 // amount/Grand-Total column seen on paper. `box-sizing:border-box` keeps
 // the 2mm side padding *inside* that 72mm rather than adding to it.
 //
+// Deliberately NOT using table-layout:fixed or fixed-percentage <colgroup>
+// widths here — that forces every cell into a rigid box and wraps normal
+// short values (dates, ages, "Yes"/"—") onto multiple lines, which is what
+// visually "stacked" the receipt vertically. table-layout:auto (the
+// default, same as before) lets the browser size columns to their content
+// exactly like the reference receipt, and simply shrinking the outer width
+// to 72mm is enough on its own to stop the right edge being clipped.
+//
 // The font is a system stack rather than a Google Fonts `<link>`: the
 // previous remote font raced the 350ms print timer (and simply isn't
 // reachable if the desk machine has no internet), so print output silently
@@ -1205,12 +1242,11 @@ const buildInvoicePrintHtml = (bodyHtml, invoiceNo) => `<html><head><title>Invoi
       *{box-sizing:border-box}
       @page{size:80mm auto;margin:0}
       html,body{margin:0;padding:0}
-      body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;width:72mm;margin:0 auto;padding:0 2mm;color:#000;line-height:1.35;font-weight:400}
+      body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;width:72mm;margin:0 auto;padding:0 2mm;color:#000;line-height:1.3;font-weight:400}
       h1{margin:0}
-      table{width:100%;border-collapse:collapse;table-layout:fixed;margin:8px 0;page-break-inside:auto}
+      table{width:100%;border-collapse:collapse;margin:10px 0;page-break-inside:auto}
       thead{display:table-header-group}
       tr{break-inside:avoid;page-break-inside:avoid}
-      th,td{overflow-wrap:break-word;word-break:break-word}
       th:last-child,td:last-child{white-space:nowrap}
       .avoid-break{break-inside:avoid;page-break-inside:avoid}
       body, body *{color:#000 !important}
@@ -1387,15 +1423,6 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
           <div>
             <table>
-              <colgroup>
-                <col style={{ width: "20%" }} />
-                <col style={{ width: "16%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "14%" }} />
-                <col style={{ width: "14%" }} />
-                <col style={{ width: "10%" }} />
-                <col style={{ width: "17%" }} />
-              </colgroup>
               <thead>
                 <tr>
                   <th style={invoiceThStyle}>Child</th>
@@ -1436,11 +1463,6 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
           <div>
             <table>
-              <colgroup>
-                <col style={{ width: "60%" }} />
-                <col style={{ width: "16%" }} />
-                <col style={{ width: "24%" }} />
-              </colgroup>
               <thead>
                 <tr>
                   <th style={invoiceThStyle}>Description</th>

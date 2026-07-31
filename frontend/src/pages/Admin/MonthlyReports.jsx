@@ -222,6 +222,8 @@ function MonthlyReports() {
             <SummaryCard label="Total Visits" value={report.summary.totalVisits} />
             <SummaryCard label="Total Revenue" value={`₹${Number(report.summary.totalRevenue).toLocaleString()}`} />
             <SummaryCard label="Reward Points Issued" value={report.summary.totalRewardPoints} />
+            <SummaryCard label="Amount Collected" value={`₹${Number(report.summary.totalAmountCollected).toLocaleString()}`} />
+            <SummaryCard label="Pending Amount" value={`₹${Number(report.summary.totalPendingAmount).toLocaleString()}`} />
           </div>
 
           <div className="surface-card overflow-hidden">
@@ -236,12 +238,14 @@ function MonthlyReports() {
                   <Th className="text-right">Visits</Th>
                   <Th className="text-right">Points</Th>
                   <Th className="text-right">Total Spent</Th>
+                  <Th className="text-right">Pending</Th>
+                  <Th>Payment Method</Th>
                 </tr>
               </thead>
               <tbody>
                 {report.customers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                    <td colSpan={9} className="text-center py-12 text-muted-foreground">
                       <UsersIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
                       No customer visits recorded for {periodLabel}.
                     </td>
@@ -267,6 +271,10 @@ function MonthlyReports() {
                       <td className="px-5 py-3.5 text-right font-medium">
                         ₹{Number(customer.totalSpent).toLocaleString()}
                       </td>
+                      <td className="px-5 py-3.5 text-right">
+                        {customer.pendingAmount > 0 ? `₹${Number(customer.pendingAmount).toLocaleString()}` : "-"}
+                      </td>
+                      <td className="px-5 py-3.5">{customer.paymentMethod}</td>
                     </tr>
                   ))
                 )}
