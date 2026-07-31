@@ -304,6 +304,39 @@ function BillingPage() {
     };
   }, []);
 
+  // Live customer search: fires as soon as the operator types (no Enter
+  // needed), debounced briefly so it doesn't fire a request per keystroke.
+  // The existing Find button/Enter-to-search flow below still works exactly
+  // as before — this just also keeps results updated while typing.
+  useEffect(() => {
+    const query = lookup.trim();
+    let cancelled = false;
+
+    const timer = setTimeout(async () => {
+      if (!query) {
+        if (!cancelled) setSearchResults([]);
+        return;
+      }
+      try {
+        const response = await axios.get(`${API_BASE}/session/billing/search`, {
+          params: { q: query },
+          withCredentials: true,
+        });
+        if (!cancelled) {
+          setSearchResults(response.data?.customers || []);
+        }
+      } catch {
+        // Silent: this is a background live-filter request, not a manual
+        // action — the explicit Find button below still surfaces errors.
+      }
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [lookup]);
+
   const addChild = () => {
     setChildren([...children, { name: "", dob: "", ageCategory: "", gender: "not_specified", socksOpted: false }]);
   };
@@ -342,15 +375,20 @@ function BillingPage() {
     setReference(selectedCustomer.reference || "");
     setNotes(selectedCustomer.notes || "");
 
-    const mappedChildren = (selectedCustomer.children || []).map((child) => ({
-      name: child.name || "",
-      dob: child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "",
-      // Age Category is mandatory per session, not carried over from
-      // historical customer records — the operator must (re)select it.
-      ageCategory: "",
-      gender: child.gender || "not_specified",
-      socksOpted: false,
-    }));
+    const mappedChildren = (selectedCustomer.children || []).map((child) => {
+      const dob = child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "";
+      // Age Category defaults from the child's DOB (below/above 3 years) so
+      // returning customers don't require re-selection — still fully
+      // editable via the Above/Below 3y buttons below.
+      const age = dob ? ageInYears(dob) : null;
+      return {
+        name: child.name || "",
+        dob,
+        ageCategory: age === null ? "" : age < 3 ? "below_3" : "above_3",
+        gender: child.gender || "not_specified",
+        socksOpted: false,
+      };
+    });
 
     setChildren(mappedChildren.length ? mappedChildren : [{ name: "", dob: "", ageCategory: "", gender: "not_specified", socksOpted: false }]);
     setSearchResults([]);

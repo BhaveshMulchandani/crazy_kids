@@ -1195,13 +1195,14 @@ const InvoiceDialog = ({ invoice, onClose }) => {
       <link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <style>
       *{box-sizing:border-box}
-      @page{size:A4;margin:14mm}
-      body{font-family:'Mulish',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;color:#111827;max-width:680px;margin:auto;line-height:1.35}
+      @page{size:80mm auto;margin:3mm}
+      body{font-family:'Mulish',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0;margin:0;width:100%;color:#000;line-height:1.3;font-weight:600}
       h1{margin:0}
       table{width:100%;border-collapse:collapse;margin:10px 0;page-break-inside:auto}
       thead{display:table-header-group}
       tr{break-inside:avoid;page-break-inside:avoid}
       .avoid-break{break-inside:avoid;page-break-inside:avoid}
+      body, body *{color:#000 !important;-webkit-text-stroke:0.2px #000}
       @media print { body{padding:0;max-width:100%} }
       </style></head><body>${html}</body></html>`);
     w.document.close();

@@ -140,7 +140,7 @@ function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
     const w = window.open("", "_blank", "width=420,height=700");
     if (!w) return;
     const html = document.getElementById("cafe-receipt")?.innerHTML ?? "";
-    w.document.write(`<html><head><title>KOT ${kotNumber}</title><style>@page{size:80mm auto;margin:4mm} body{font-family:'Courier New',monospace;width:72mm;font-size:12px;color:#000;padding:8px}.row{display:flex;justify-content:space-between}.hr{border-top:1px dashed #000;margin:6px 0}.center{text-align:center}</style></head><body>${html}</body></html>`);
+    w.document.write(`<html><head><title>KOT ${kotNumber}</title><style>@page{size:80mm auto;margin:4mm} body{font-family:'Courier New',monospace;width:72mm;font-size:12px;color:#000;font-weight:700;padding:8px}.row{display:flex;justify-content:space-between}.hr{border-top:1px dashed #000;margin:6px 0}.center{text-align:center}body, body *{color:#000 !important;-webkit-text-stroke:0.25px #000}</style></head><body>${html}</body></html>`);
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 250);
