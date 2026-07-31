@@ -136,11 +136,30 @@ function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
   const createdAt = kot.createdAt ? new Date(kot.createdAt) : new Date();
   const total = cartSnapshot.reduce((sum, item) => sum + item.qty * item.price, 0);
 
+  // Prints straight to the fixed kitchen printer (Kitchen_Print, see
+  // electron/main.js) with no OS print dialog whenever running inside the
+  // Electron shell. Plain-browser dev/preview (no window.electronAPI) keeps
+  // the previous popup + window.print() behavior. The receipt markup/format
+  // itself is untouched — only how it gets to paper changes. `box-sizing`
+  // is added so the 8px body padding sits inside the declared 72mm width
+  // instead of adding to it (the same right-edge overflow that clipped the
+  // invoice column).
   const print = () => {
+    const html = document.getElementById("cafe-receipt")?.innerHTML ?? "";
+    const fullHtml = `<html><head><title>KOT ${kotNumber}</title><style>*{box-sizing:border-box}@page{size:80mm auto;margin:4mm} body{font-family:'Courier New',monospace;width:72mm;font-size:12px;color:#000;font-weight:700;padding:8px}.row{display:flex;justify-content:space-between}.hr{border-top:1px dashed #000;margin:6px 0}.center{text-align:center}body, body *{color:#000 !important;-webkit-text-stroke:0.25px #000}</style></head><body>${html}</body></html>`;
+
+    if (window.electronAPI?.printKOT) {
+      window.electronAPI.printKOT(fullHtml).then((result) => {
+        if (!result?.printed) {
+          toast.error(`KOT print failed${result?.error ? `: ${result.error}` : ""}`);
+        }
+      });
+      return;
+    }
+
     const w = window.open("", "_blank", "width=420,height=700");
     if (!w) return;
-    const html = document.getElementById("cafe-receipt")?.innerHTML ?? "";
-    w.document.write(`<html><head><title>KOT ${kotNumber}</title><style>@page{size:80mm auto;margin:4mm} body{font-family:'Courier New',monospace;width:72mm;font-size:12px;color:#000;font-weight:700;padding:8px}.row{display:flex;justify-content:space-between}.hr{border-top:1px dashed #000;margin:6px 0}.center{text-align:center}body, body *{color:#000 !important;-webkit-text-stroke:0.25px #000}</style></head><body>${html}</body></html>`);
+    w.document.write(fullHtml);
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 250);

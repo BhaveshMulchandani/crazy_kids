@@ -1,8 +1,94 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 
 let mainWindow;
+
+// Fixed printer assignment (see docs/…): the desk never picks a printer
+// manually — invoices always go to the receipt printer, KOTs always go to
+// the kitchen printer.
+const PRINTER_NAMES = {
+  invoice: "EPSON TM-T82X Receipt6",
+  kot: "Kitchen_Print",
+};
+
+// Renders `html` in an off-screen window and sends it straight to
+// `deviceName` with no OS print dialog. Used for both invoice and KOT
+// printing so the desk operator never has to choose a printer. Falls back
+// to the system default printer (still silently, no dialog) if the
+// configured device isn't present on this machine, so a printer rename/
+// unplug degrades gracefully instead of blocking checkout.
+async function silentPrintHtml(html, { deviceName, pageSize }) {
+  const printWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { sandbox: false },
+  });
+
+  try {
+    const dataUrl = `data:text/html;charset=utf-8;base64,${Buffer.from(
+      html,
+      "utf8"
+    ).toString("base64")}`;
+    await printWindow.loadURL(dataUrl);
+
+    const printers = await printWindow.webContents.getPrintersAsync();
+    const matched = printers.find((p) => p.name === deviceName);
+    if (!matched) {
+      console.warn(
+        `[print] Configured printer "${deviceName}" not found; using system default instead.`
+      );
+    }
+
+    await new Promise((resolve, reject) => {
+      printWindow.webContents.print(
+        {
+          silent: true,
+          printBackground: true,
+          ...(matched ? { deviceName } : {}),
+          margins: { marginType: "none" },
+          pageSize,
+        },
+        (success, errorType) => {
+          if (success) resolve();
+          else reject(new Error(errorType || "Print failed"));
+        }
+      );
+    });
+
+    return { printed: true, matchedPrinter: !!matched };
+  } finally {
+    printWindow.destroy();
+  }
+}
+
+// 80mm-wide receipt roll, generous nominal length — the thermal driver cuts
+// at the actual content end, this just avoids Electron clipping the layout
+// to a short fixed page.
+const RECEIPT_PAGE_SIZE = { width: 80000, height: 297000 };
+
+ipcMain.handle("print-invoice", async (_event, html) => {
+  try {
+    return await silentPrintHtml(html, {
+      deviceName: PRINTER_NAMES.invoice,
+      pageSize: RECEIPT_PAGE_SIZE,
+    });
+  } catch (err) {
+    console.error("[print-invoice] failed:", err);
+    return { printed: false, error: err.message };
+  }
+});
+
+ipcMain.handle("print-kot", async (_event, html) => {
+  try {
+    return await silentPrintHtml(html, {
+      deviceName: PRINTER_NAMES.kot,
+      pageSize: RECEIPT_PAGE_SIZE,
+    });
+  } catch (err) {
+    console.error("[print-kot] failed:", err);
+    return { printed: false, error: err.message };
+  }
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({

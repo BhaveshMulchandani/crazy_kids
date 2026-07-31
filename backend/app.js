@@ -18,13 +18,27 @@ const { startBirthdayCron } = require('./cron/birthdayCron')
 const cors = require('cors');
 const cookieParser = require("cookie-parser");
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://pos.sosiyo.com",
+];
+
 app.use(
-  cors({ 
-    // "http://localhost:5173"
-    origin: [
-             "http://localhost:5173",
-      "https://pos.sosiyo.com"
-    ],
+  cors({
+    // The packaged Electron app loads the frontend via file:// (loadFile),
+    // which is an opaque origin — browsers send it as request Origin "null"
+    // (and some requests carry no Origin header at all). Neither ever
+    // matches a plain string whitelist, so the desktop build's requests
+    // (including customer search) were silently rejected by CORS while the
+    // same code worked fine in dev, where Vite serves the whitelisted
+    // http://localhost:5173 origin. Allow no-origin/"null" requests through
+    // in addition to the existing whitelisted web origins.
+    origin: (origin, callback) => {
+      if (!origin || origin === "null" || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
   })
 );

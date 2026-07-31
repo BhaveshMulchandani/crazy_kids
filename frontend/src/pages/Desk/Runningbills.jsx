@@ -1049,9 +1049,10 @@ const InvoiceRow = ({ label, value, bold, muted, color }) => (
 );
 
 const invoiceThStyle = {
-  padding: "5px 7px",
+  padding: "6px 8px",
   textAlign: "left",
   fontSize: 10,
+  fontWeight: 700,
   letterSpacing: 0.4,
   textTransform: "uppercase",
   color: "#475569",
@@ -1060,8 +1061,8 @@ const invoiceThStyle = {
 };
 
 const invoiceTdStyle = {
-  padding: "5px 7px",
-  fontSize: 11.5,
+  padding: "6px 8px",
+  fontSize: 12,
   color: INVOICE_TEXT,
   borderBottom: `1px solid ${INVOICE_BORDER}`,
 };
@@ -1180,31 +1181,67 @@ const generateInvoicePdfBlob = async () => {
   return pdf.output("blob");
 };
 
+// Builds the standalone print document for an invoice. Used both by the
+// Electron silent-print path (main.js loads this string into a hidden
+// window) and the plain-browser fallback (window.open + w.print()), so the
+// two paths always render identically.
+//
+// Width is pinned to 72mm — the EPSON TM-T82X's documented *printable*
+// width on an 80mm roll (the extra ~8mm is unprintable margin baked into
+// the roll/head, not available page area). Templates that assumed the full
+// 80mm minus a small margin (e.g. 74mm) render a couple mm past the
+// printhead's actual right edge, which is exactly the clipped
+// amount/Grand-Total column seen on paper. `box-sizing:border-box` keeps
+// the 2mm side padding *inside* that 72mm rather than adding to it.
+//
+// The font is a system stack rather than a Google Fonts `<link>`: the
+// previous remote font raced the 350ms print timer (and simply isn't
+// reachable if the desk machine has no internet), so print output silently
+// fell back to a different font at a different weight than what was
+// previewed on screen — the reported "poor/inconsistent font rendering".
+// A system font is available offline and renders identically every time.
+const buildInvoicePrintHtml = (bodyHtml, invoiceNo) => `<html><head><title>Invoice ${invoiceNo}</title>
+      <style>
+      *{box-sizing:border-box}
+      @page{size:80mm auto;margin:0}
+      html,body{margin:0;padding:0}
+      body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;width:72mm;margin:0 auto;padding:0 2mm;color:#000;line-height:1.35;font-weight:400}
+      h1{margin:0}
+      table{width:100%;border-collapse:collapse;table-layout:fixed;margin:8px 0;page-break-inside:auto}
+      thead{display:table-header-group}
+      tr{break-inside:avoid;page-break-inside:avoid}
+      th,td{overflow-wrap:break-word;word-break:break-word}
+      th:last-child,td:last-child{white-space:nowrap}
+      .avoid-break{break-inside:avoid;page-break-inside:avoid}
+      body, body *{color:#000 !important}
+      @media print { body{padding:0 2mm} }
+      </style></head><body>${bodyHtml}</body></html>`;
+
 const InvoiceDialog = ({ invoice, onClose }) => {
   const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
 
   if (!invoice) return null;
 
+  // Prints straight to the fixed receipt printer (EPSON TM-T82X Receipt6,
+  // see electron/main.js) with no OS print dialog whenever running inside
+  // the Electron shell. Plain-browser dev/preview (no window.electronAPI)
+  // keeps the previous popup + window.print() behavior.
   const print = () => {
+    const html = document.getElementById("invoice-print")?.innerHTML ?? "";
+    const fullHtml = buildInvoicePrintHtml(html, invoice.invoice_no);
+
+    if (window.electronAPI?.printInvoice) {
+      window.electronAPI.printInvoice(fullHtml).then((result) => {
+        if (!result?.printed) {
+          toast.error(`Invoice print failed${result?.error ? `: ${result.error}` : ""}`);
+        }
+      });
+      return;
+    }
+
     const w = window.open("", "_blank", "width=720,height=900");
     if (!w) return;
-    const html = document.getElementById("invoice-print")?.innerHTML ?? "";
-    w.document.write(`<html><head><title>Invoice ${invoice.invoice_no}</title>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-      <link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;600;700;800&display=swap" rel="stylesheet" />
-      <style>
-      *{box-sizing:border-box}
-      @page{size:80mm auto;margin:3mm}
-      body{font-family:'Mulish',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0;margin:0;width:100%;color:#000;line-height:1.3;font-weight:600}
-      h1{margin:0}
-      table{width:100%;border-collapse:collapse;margin:10px 0;page-break-inside:auto}
-      thead{display:table-header-group}
-      tr{break-inside:avoid;page-break-inside:avoid}
-      .avoid-break{break-inside:avoid;page-break-inside:avoid}
-      body, body *{color:#000 !important;-webkit-text-stroke:0.2px #000}
-      @media print { body{padding:0;max-width:100%} }
-      </style></head><body>${html}</body></html>`);
+    w.document.write(fullHtml);
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 350);
@@ -1350,6 +1387,15 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
           <div>
             <table>
+              <colgroup>
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "17%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th style={invoiceThStyle}>Child</th>
@@ -1390,6 +1436,11 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
           <div>
             <table>
+              <colgroup>
+                <col style={{ width: "60%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "24%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th style={invoiceThStyle}>Description</th>
