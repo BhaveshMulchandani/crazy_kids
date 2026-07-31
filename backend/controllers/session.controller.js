@@ -1000,9 +1000,12 @@ const searchBillingCustomer = async (req, res) => {
           $in: ["completed"],
         },
         $or: [
-          ...buildCustomerNameOr(trimmedQuery, { exact: true }),
+          // Substring (not exact) match on Parent Name / Child Name and
+          // Mobile Number — powers live, type-ahead billing search where
+          // each keystroke narrows the result set (e.g. "R" → "RU" → "RUD").
+          ...buildCustomerNameOr(trimmedQuery),
           {
-            mobileNumber: trimmedQuery,
+            mobileNumber: { $regex: escapedQuery, $options: "i" },
           },
           {
             sessionNumber: trimmedQuery,

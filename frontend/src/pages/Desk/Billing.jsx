@@ -304,10 +304,16 @@ function BillingPage() {
     };
   }, []);
 
-  // Live customer search: fires as soon as the operator types (no Enter
-  // needed), debounced briefly so it doesn't fire a request per keystroke.
-  // The existing Find button/Enter-to-search flow below still works exactly
-  // as before — this just also keeps results updated while typing.
+  // Live customer search: fires on every keystroke, no Enter/click needed —
+  // matches Parent Name, Child Name, and Mobile Number as substrings (see
+  // searchBillingCustomer on the backend), so "R" → "RU" → "RUD" narrows the
+  // result set instantly like a browser address bar. The request is queued
+  // via a 0ms timer (not called synchronously in the effect body) purely so
+  // React doesn't warn about setState-during-render; it fires on the very
+  // next tick, so there's no perceptible delay. The `cancelled` guard below
+  // still discards a stale in-flight response if a newer keystroke supersedes
+  // it before the network reply comes back. The existing Find button/Enter
+  // flow keeps working exactly as before.
   useEffect(() => {
     const query = lookup.trim();
     let cancelled = false;
@@ -329,7 +335,7 @@ function BillingPage() {
         // Silent: this is a background live-filter request, not a manual
         // action — the explicit Find button below still surfaces errors.
       }
-    }, 150);
+    }, 0);
 
     return () => {
       cancelled = true;
