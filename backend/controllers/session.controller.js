@@ -42,7 +42,7 @@ const PriceSetting = require('../models/price.model');
 const Membership = require('../models/membership.model');
 const Offer = require('../models/offer.model');
 const { createMembership, refreshStatus } = require('./membership.controller');
-const { calculateInvoiceCharges, dayName } = require('../services/billing.service');
+const { calculateInvoiceCharges, dayName, round } = require('../services/billing.service');
 const Notification = require('../models/notification.model');
 const { getNextFormattedNumber } = require('../services/counter.service');
 const { buildCustomerNameOr, escapeRegex } = require('../utils/customerSearch');
@@ -877,6 +877,65 @@ const completesession = async (req, res) => {
   }
 };
 
+// Settles the outstanding balance on a not-yet-completed session (booked/
+// running/paused) with an operator-chosen payment mode. This is additive: a
+// brand-new action, not a change to how completesession or the original
+// booking payment fields (paymentStatus/paymentMethod/paymentBreakdown/
+// amountPaid) are calculated. It reuses calculateInvoiceCharges — the same
+// authoritative pricing function completesession itself uses — purely as a
+// read (no membership/offer mutation happens here) so the amount marked
+// "paid" always matches what checkout would actually charge, never a
+// separately-maintained figure.
+//
+// paymentBreakdown gets a new entry appended (not replaced) so an earlier
+// partial payment recorded at booking time is preserved alongside this
+// settlement — mirrors how a split payment is already represented.
+const settlePendingPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { method } = req.body || {};
+
+    if (!["cash", "upi", "card"].includes(method)) {
+      return res.status(400).json({ message: "method must be one of cash, upi, card" });
+    }
+
+    const session = await sessionmodel.findById(id);
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+    if (session.status === "completed" || session.status === "cancelled") {
+      return res.status(400).json({ message: "Session is already closed" });
+    }
+
+    const settings = await PriceSetting.findOne();
+    const kots = await KOT.find({ session: id }).sort({ createdAt: -1 });
+    const calculation = await calculateInvoiceCharges({ session, settings, kots });
+    const pendingAmount = round(Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0));
+
+    if (pendingAmount <= 0) {
+      return res.status(400).json({ message: "Session has no pending balance" });
+    }
+
+    session.paymentBreakdown = [
+      ...(session.paymentBreakdown || []),
+      { method, amount: pendingAmount },
+    ];
+    session.amountPaid = round(Number(session.amountPaid || 0) + pendingAmount);
+    session.paymentStatus = "paid";
+    session.paymentMethod = method;
+    await session.save();
+
+    return res.status(200).json({
+      message: "Pending payment settled",
+      session,
+      settledAmount: pendingAmount,
+      method,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 const runningsession = async (req, res) => {
   try {
     const sessions = await sessionmodel
@@ -1071,5 +1130,5 @@ const searchBillingCustomer = async (req, res) => {
 
 
 module.exports = {
-  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, runningsession, recentCompletedSessions, getSessionKOTs, pauseChild, resumeChild
+  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, settlePendingPayment, runningsession, recentCompletedSessions, getSessionKOTs, pauseChild, resumeChild
 };

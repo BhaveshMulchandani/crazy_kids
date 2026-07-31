@@ -520,6 +520,61 @@ const Row = ({ k, v, bold, accent }) => (
   </div>
 );
 
+const PAYMENT_MODE_OPTIONS = [
+  { value: "cash", label: "Cash" },
+  { value: "upi", label: "UPI" },
+  { value: "card", label: "Card" },
+];
+
+// Inline "collect the pending amount now" control — shown on a bill card
+// only while paymentSummary.pendingAmount > 0. Purely additive UI: it calls
+// the new PATCH /session/settle-payment/:id endpoint, it doesn't touch the
+// existing booking-time payment fields/flow or the Checkout dialog at all.
+// Once settled, the parent's loadSessions() refresh (passed in via
+// onSettle, same pattern as onPause/onExtend/etc.) picks up the updated
+// paymentStatus/paymentBreakdown and the "Payment Completed Using" row
+// takes over from this control automatically.
+const SettlePendingPaymentControl = ({ pendingAmount, onSettle }) => {
+  const [method, setMethod] = useState("cash");
+  const [submitting, setSubmitting] = useState(false);
+
+  const settle = async () => {
+    setSubmitting(true);
+    try {
+      await onSettle(method);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5">
+      <select
+        value={method}
+        onChange={(e) => setMethod(e.target.value)}
+        disabled={submitting}
+        className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {PAYMENT_MODE_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <Button
+        type="button"
+        size="sm"
+        className="h-7 px-2 text-xs"
+        style={{ background: "var(--primary)" }}
+        onClick={settle}
+        disabled={submitting}
+      >
+        {submitting ? "Settling…" : `Mark ${formatCurrency(pendingAmount)} paid`}
+      </Button>
+    </div>
+  );
+};
+
 const BillCard = ({
   bill,
   onPause,
@@ -529,6 +584,7 @@ const BillCard = ({
   onExtend,
   onPauseChild,
   onResumeChild,
+  onSettlePayment,
   pricingSettings,
   kotsBySession,
   highlighted,
@@ -750,6 +806,12 @@ const BillCard = ({
           <Row k="Payment Status" v={paymentSummary.paymentStatusLabel} />
           {paymentSummary.paymentMethodLabel && (
             <Row k="Payment Completed Using" v={paymentSummary.paymentMethodLabel} />
+          )}
+          {paymentSummary.pendingAmount > 0 && onSettlePayment && (
+            <SettlePendingPaymentControl
+              pendingAmount={paymentSummary.pendingAmount}
+              onSettle={(method) => onSettlePayment(method)}
+            />
           )}
         </div>
       </div>
@@ -1829,6 +1891,24 @@ function SessionsPage() {
     }
   };
 
+  // Records how a previously-pending balance got paid, before checkout —
+  // new action, doesn't touch the booking-time payment fields' meaning or
+  // the Checkout dialog/complete-session flow at all. See
+  // settlePendingPayment in session.controller.js.
+  const settlePayment = async (b, method) => {
+    try {
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/session/settle-payment/${b._id}`,
+        { method },
+        { withCredentials: true },
+      );
+      toast.success("Pending payment settled");
+      await loadSessions();
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to settle pending payment");
+    }
+  };
+
   const checkout = (b) => setCheckoutBillId(b._id);
 
   const openInvoice = async (session) => {
@@ -1960,6 +2040,7 @@ function SessionsPage() {
                 onExtend={() => extendHour(b)}
                 onPauseChild={(index) => pauseChild(b, index)}
                 onResumeChild={(index) => resumeChild(b, index)}
+                onSettlePayment={(method) => settlePayment(b, method)}
                 pricingSettings={pricingSettings}
                 kotsBySession={kotsBySession}
                 highlighted={b._id === highlightId}
@@ -1996,6 +2077,7 @@ function SessionsPage() {
                 onExtend={() => extendHour(b)}
                 onPauseChild={(index) => pauseChild(b, index)}
                 onResumeChild={(index) => resumeChild(b, index)}
+                onSettlePayment={(method) => settlePayment(b, method)}
                 pricingSettings={pricingSettings}
                 kotsBySession={kotsBySession}
                 highlighted={b._id === highlightId}
