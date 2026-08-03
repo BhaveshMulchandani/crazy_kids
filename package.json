@@ -1,6 +1,6 @@
 {
   "name": "crazy_kids",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Crazy Kids POS",
   "main": "electron/main.js",
   "author": "Sosiyo",
