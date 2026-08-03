@@ -104,6 +104,12 @@ const sendInvoice = async ({ destination, userName, invoiceNumber, grandTotal, r
   const { apiKey, campaignName, baseUrl } = readConfig();
 
   if (!apiKey || !campaignName || !baseUrl) {
+    console.error("[whatsapp.service] sendInvoice: missing config", {
+      hasApiKey: !!apiKey,
+      hasCampaignName: !!campaignName,
+      hasBaseUrl: !!baseUrl,
+      cwd: process.cwd(),
+    });
     const error = new Error("WhatsApp sending is not configured on the server.");
     error.statusCode = 500;
     throw error;
