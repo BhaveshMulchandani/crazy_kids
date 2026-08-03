@@ -107,6 +107,7 @@ const buildInvoicePayload = async ({ session, kots, settings }) => {
           amount: Number(entry?.amount || 0),
         }))
         : [],
+      method: session.paymentMethod || "cash",
       amountPaid: Number(session.amountPaid || 0),
       pendingAmount: Math.max(calculation.grandTotal - Number(session.amountPaid || 0), 0),
     },

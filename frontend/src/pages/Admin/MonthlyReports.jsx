@@ -60,21 +60,26 @@ const MONTHS = [
 
 const now = new Date();
 const YEARS = Array.from({ length: 6 }, (_, i) => now.getFullYear() - i);
+const todayInputValue = now.toISOString().slice(0, 10);
 
 function MonthlyReports() {
   const API_BASE = import.meta.env.VITE_API_URL;
-  // "monthly" reuses the existing month+year report; "yearly" is the same
-  // report/summary/table shape generated over a full calendar year instead
-  // — only the endpoint and period label differ below.
+  // "daily"/"monthly"/"yearly" all reuse the same report/summary/table
+  // shape (getCustomerReportDataForRange on the backend) — only the
+  // endpoint, params, and period label differ below.
   const [reportType, setReportType] = React.useState("monthly");
+  const [date, setDate] = React.useState(todayInputValue);
   const [month, setMonth] = React.useState(now.getMonth() + 1);
   const [year, setYear] = React.useState(now.getFullYear());
   const [report, setReport] = React.useState(null);
   const [generating, setGenerating] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
 
+  const isDaily = reportType === "daily";
   const isYearly = reportType === "yearly";
-  const periodLabel = isYearly ? String(year) : `${MONTHS[month - 1]} ${year}`;
+  const reportPath = isDaily ? "daily" : isYearly ? "yearly" : "monthly";
+  const periodLabel = isDaily ? date : isYearly ? String(year) : `${MONTHS[month - 1]} ${year}`;
+  const reportParams = isDaily ? { date } : isYearly ? { year } : { month, year };
 
   const generateReport = async () => {
     try {
@@ -82,9 +87,9 @@ function MonthlyReports() {
       setReport(null);
 
       const res = await axios.get(
-        `${API_BASE}/admin/reports/${isYearly ? "yearly" : "monthly"}`,
+        `${API_BASE}/admin/reports/${reportPath}`,
         {
-          params: isYearly ? { year } : { month, year },
+          params: reportParams,
           withCredentials: true,
         },
       );
@@ -104,9 +109,9 @@ function MonthlyReports() {
       setDownloading(true);
 
       const res = await axios.get(
-        `${API_BASE}/admin/reports/${isYearly ? "yearly" : "monthly"}/pdf`,
+        `${API_BASE}/admin/reports/${reportPath}/pdf`,
         {
-          params: isYearly ? { year } : { month, year },
+          params: reportParams,
           withCredentials: true,
           responseType: "blob",
         },
@@ -117,7 +122,11 @@ function MonthlyReports() {
       link.href = url;
       link.setAttribute(
         "download",
-        isYearly ? `Customer_Report_${year}.pdf` : `Customer_Report_${MONTHS[month - 1]}_${year}.pdf`,
+        isDaily
+          ? `Customer_Report_${date}.pdf`
+          : isYearly
+            ? `Customer_Report_${year}.pdf`
+            : `Customer_Report_${MONTHS[month - 1]}_${year}.pdf`,
       );
       document.body.appendChild(link);
       link.click();
@@ -151,12 +160,26 @@ function MonthlyReports() {
               value={reportType}
               onChange={(e) => setReportType(e.target.value)}
             >
+              <option value="daily">Daily</option>
               <option value="monthly">Monthly</option>
               <option value="yearly">Yearly</option>
             </Select>
           </div>
 
-          {!isYearly && (
+          {isDaily && (
+            <div className="w-full sm:w-48">
+              <label className="text-sm font-medium leading-none">Date</label>
+              <input
+                type="date"
+                className="mt-1.5 flex h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                value={date}
+                max={todayInputValue}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </div>
+          )}
+
+          {!isDaily && !isYearly && (
             <div className="w-full sm:w-48">
               <label className="text-sm font-medium leading-none">Month</label>
               <Select
@@ -173,20 +196,22 @@ function MonthlyReports() {
             </div>
           )}
 
-          <div className="w-full sm:w-36">
-            <label className="text-sm font-medium leading-none">Year</label>
-            <Select
-              className="mt-1.5"
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-            >
-              {YEARS.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </Select>
-          </div>
+          {!isDaily && (
+            <div className="w-full sm:w-36">
+              <label className="text-sm font-medium leading-none">Year</label>
+              <Select
+                className="mt-1.5"
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+              >
+                {YEARS.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-3 text-white">
             <Button className="h-10 px-5 bg-blue-600" onClick={generateReport} disabled={generating}>
@@ -208,9 +233,11 @@ function MonthlyReports() {
 
         {!report && !generating && (
           <p className="mt-4 text-sm text-muted-foreground">
-            {isYearly
-              ? 'Select a year, then click "Generate Report" to preview the data.'
-              : 'Select a month and year, then click "Generate Report" to preview the data.'}
+            {isDaily
+              ? 'Select a date, then click "Generate Report" to preview the data.'
+              : isYearly
+                ? 'Select a year, then click "Generate Report" to preview the data.'
+                : 'Select a month and year, then click "Generate Report" to preview the data.'}
           </p>
         )}
       </div>
@@ -225,6 +252,29 @@ function MonthlyReports() {
             <SummaryCard label="Amount Collected" value={`₹${Number(report.summary.totalAmountCollected).toLocaleString()}`} />
             <SummaryCard label="Pending Amount" value={`₹${Number(report.summary.totalPendingAmount).toLocaleString()}`} />
           </div>
+
+          {report.revenueByPaymentMethod && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
+              <div className="surface-card p-5">
+                <h3 className="font-semibold mb-3">Session Revenue by Payment Mode</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <SummaryCard label="Total" value={`₹${Number(report.revenueByPaymentMethod.session.total).toLocaleString()}`} />
+                  <SummaryCard label="Cash" value={`₹${Number(report.revenueByPaymentMethod.session.cash).toLocaleString()}`} />
+                  <SummaryCard label="UPI" value={`₹${Number(report.revenueByPaymentMethod.session.upi).toLocaleString()}`} />
+                  <SummaryCard label="Card" value={`₹${Number(report.revenueByPaymentMethod.session.card).toLocaleString()}`} />
+                </div>
+              </div>
+              <div className="surface-card p-5">
+                <h3 className="font-semibold mb-3">Cafe Revenue by Payment Mode</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <SummaryCard label="Total" value={`₹${Number(report.revenueByPaymentMethod.cafe.total).toLocaleString()}`} />
+                  <SummaryCard label="Cash" value={`₹${Number(report.revenueByPaymentMethod.cafe.cash).toLocaleString()}`} />
+                  <SummaryCard label="UPI" value={`₹${Number(report.revenueByPaymentMethod.cafe.upi).toLocaleString()}`} />
+                  <SummaryCard label="Card" value={`₹${Number(report.revenueByPaymentMethod.cafe.card).toLocaleString()}`} />
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="surface-card overflow-hidden">
             <div className="overflow-x-auto">

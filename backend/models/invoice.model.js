@@ -127,6 +127,11 @@ const invoiceSchema = new mongoose.Schema(
           amount: { type: Number, default: 0 },
         },
       ],
+      // Mirrors session.paymentMethod — the fallback used to attribute this
+      // invoice's revenue to a payment mode (see revenue.service.js) when
+      // `breakdown` is still empty (e.g. a session completed while fully
+      // "pending"). Not shown anywhere on the invoice itself.
+      method: { type: String, default: "cash" },
       amountPaid: { type: Number, default: 0 },
       pendingAmount: { type: Number, default: 0 },
     },

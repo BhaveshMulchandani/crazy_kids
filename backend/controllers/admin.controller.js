@@ -1,6 +1,13 @@
 const sessionmodel = require("../models/session.model");
 const Invoice = require("../models/invoice.model");
 const PDFDocument = require("pdfkit");
+const { aggregateRevenueByMethod } = require("../services/revenue.service");
+
+// Lean projection shared by every payment-mode-segregated revenue query
+// below (dashboard lifetime/today, and each report's date range) — kept in
+// one place so the field list backing aggregateRevenueByMethod can't drift
+// between call sites.
+const REVENUE_INVOICE_FIELDS = "charges.sessionTotal charges.cafeTotal payment.breakdown payment.method";
 
 const startOfDay = (date = new Date()) => {
   const d = new Date(date);
@@ -48,7 +55,7 @@ const dashboardStats = async (req, res) => {
     const trendStart = startOfDay(new Date(today.getTime() - 13 * 24 * 60 * 60 * 1000));
     const tz = tzOffsetString(now);
 
-    const [facetResult, activeSessions, cancelledTotal, cancelledToday] = await Promise.all([
+    const [facetResult, activeSessions, cancelledTotal, cancelledToday, lifetimeRevenueInvoices, todayRevenueInvoices] = await Promise.all([
       Invoice.aggregate([
         {
           $facet: {
@@ -180,10 +187,19 @@ const dashboardStats = async (req, res) => {
         .lean(),
       sessionmodel.countDocuments({ status: "cancelled" }),
       sessionmodel.countDocuments({ status: "cancelled", cancelledAt: { $gte: today } }),
+      Invoice.find().select(REVENUE_INVOICE_FIELDS).lean(),
+      Invoice.find({ createdAt: { $gte: today } }).select(REVENUE_INVOICE_FIELDS).lean(),
     ]);
 
     const facets = facetResult[0];
     const totals = facets.totals[0] || { totalRevenue: 0, cafeRevenue: 0, totalOrders: 0 };
+    // Session/Cafe Revenue segregated by payment mode (cash/upi/card) — see
+    // revenue.service.js. Reuses the same charges.sessionTotal/cafeTotal
+    // fields totals.totalRevenue/cafeRevenue above are already built from,
+    // so .session.total/.cafe.total reconcile with the existing figures
+    // exactly; this only adds the cash/upi/card split on top.
+    const { session: sessionRevenue, cafe: cafeRevenue } = aggregateRevenueByMethod(lifetimeRevenueInvoices);
+    const { session: todaySessionRevenue, cafe: todayCafeRevenue } = aggregateRevenueByMethod(todayRevenueInvoices);
     const week = facets.week[0] || { sales: 0, cafeSales: 0 };
     const month = facets.month[0] || { sales: 0 };
     const todaySales = facets.today.reduce((sum, c) => sum + Number(c.total || 0), 0);
@@ -217,7 +233,14 @@ const dashboardStats = async (req, res) => {
 
     return res.status(200).json({
       totals,
-      today: { sales: todaySales, customers: todayCustomers },
+      sessionRevenue,
+      cafeRevenue,
+      today: {
+        sales: todaySales,
+        customers: todayCustomers,
+        sessionRevenue: todaySessionRevenue,
+        cafeRevenue: todayCafeRevenue,
+      },
       week,
       month,
       repeatCustomers,
@@ -374,6 +397,13 @@ const yearRange = (year) => {
   return { start, end };
 };
 
+// Builds the [start, end) date range for a single calendar day.
+const dayRange = (date) => {
+  const start = startOfDay(date);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+};
+
 // Per-customer stats for an arbitrary [start, end) date range, computed
 // entirely via aggregation pipelines so the collections are never pulled into
 // app memory wholesale — only the (small) set of rows matching the range is
@@ -383,7 +413,7 @@ const yearRange = (year) => {
 const REPORT_PAYMENT_METHOD_LABELS = { cash: "Cash", upi: "UPI", card: "Card" };
 
 const getCustomerReportDataForRange = async (start, end) => {
-  const [visitAgg, invoiceAgg, cityAgg, areaAgg, paymentMethodAgg, pendingAgg] = await Promise.all([
+  const [visitAgg, invoiceAgg, cityAgg, areaAgg, paymentMethodAgg, pendingAgg, revenueInvoices] = await Promise.all([
     sessionmodel.aggregate([
       { $match: { status: "completed", actualEndTime: { $gte: start, $lt: end } } },
       {
@@ -512,7 +542,15 @@ const getCustomerReportDataForRange = async (start, end) => {
         },
       },
     ]),
+    // Session/Cafe Revenue segregated by payment mode (cash/upi/card) — see
+    // revenue.service.js. Sums the same charges.sessionTotal/cafeTotal
+    // fields the summary totals below are built from, over this exact
+    // [start,end) range, so it reconciles with
+    // summary.totalRevenueFromSessions/totalRevenueFromCafe exactly.
+    Invoice.find({ createdAt: { $gte: start, $lt: end } }).select(REVENUE_INVOICE_FIELDS).lean(),
   ]);
+
+  const revenueByPaymentMethod = aggregateRevenueByMethod(revenueInvoices);
 
   const visitMap = new Map(visitAgg.map((row) => [row._id, row]));
   const invoiceMap = new Map(invoiceAgg.map((row) => [row._id, row]));
@@ -616,7 +654,7 @@ const getCustomerReportDataForRange = async (start, end) => {
     invoiceCount: pendingAgg[0]?.pendingInvoiceCount || 0,
   };
 
-  return { customers, summary, revenueByCity, revenueByArea, paymentMethodBreakdown, pendingPayments };
+  return { customers, summary, revenueByCity, revenueByArea, paymentMethodBreakdown, pendingPayments, revenueByPaymentMethod };
 };
 
 const getMonthlyReportData = async (month, year) => {
@@ -631,6 +669,28 @@ const getYearlyReportData = async (year) => {
   const { start, end } = yearRange(year);
   const data = await getCustomerReportDataForRange(start, end);
   return { year: Number(year), ...data };
+};
+
+// Same fields/metrics as the monthly/yearly reports — only the date range
+// (a single calendar day) differs.
+const getDailyReportData = async (date) => {
+  const { start, end } = dayRange(date);
+  const data = await getCustomerReportDataForRange(start, end);
+  return { date: localDateKey(start), ...data };
+};
+
+const parseDateQuery = (req, res) => {
+  const raw = String(req.query.date || "");
+  // new Date("not-a-date") is an "Invalid Date", not a thrown error —
+  // getTime() NaN is what actually catches a malformed value here.
+  const date = new Date(raw);
+
+  if (!raw || Number.isNaN(date.getTime())) {
+    res.status(400).json({ message: "Valid date (YYYY-MM-DD) query param is required" });
+    return null;
+  }
+
+  return { date };
 };
 
 const parseMonthYear = (req, res) => {
@@ -657,6 +717,18 @@ const monthlyCustomerReport = async (req, res) => {
   }
 };
 
+const dailyCustomerReport = async (req, res) => {
+  try {
+    const parsed = parseDateQuery(req, res);
+    if (!parsed) return;
+
+    const report = await getDailyReportData(parsed.date);
+    return res.status(200).json(report);
+  } catch (error) {
+    return res.status(500).json({ message: error.message || "Unable to generate daily report" });
+  }
+};
+
 const pad2 = (n) => String(n).padStart(2, "0");
 const formatGeneratedOn = (date) =>
   `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
@@ -665,7 +737,7 @@ const formatGeneratedOn = (date) =>
 // same columns, same summary/revenue cards, same pagination; only the title
 // line, period label, and filename differ between the two callers below.
 const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, report }) => {
-  const { customers, summary, revenueByCity, revenueByArea, paymentMethodBreakdown, pendingPayments } = report;
+  const { customers, summary, revenueByCity, revenueByArea, paymentMethodBreakdown, pendingPayments, revenueByPaymentMethod } = report;
 
     // Landscape — the report now carries 13 columns (area + city +
     // offer/membership + the session/cafe/socks breakdown added on top of
@@ -911,6 +983,29 @@ const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, repo
     ];
     y = drawCardSection("Payment Settlement", settlementRows, y);
 
+    // Session/Cafe Revenue by payment mode — additive cards, same
+    // drawCardSection used above. .total on each reconciles exactly with
+    // "Total Revenue From Sessions"/"Total Revenue From Cafe" in the
+    // Summary card above (same charges.sessionTotal/cafeTotal fields, same
+    // period) — this only adds the cash/upi/card split on top.
+    if (revenueByPaymentMethod) {
+      const sessionRevenueRows = [
+        ["Total", `Rs. ${Number(revenueByPaymentMethod.session.total).toLocaleString("en-IN")}`],
+        ["Cash", `Rs. ${Number(revenueByPaymentMethod.session.cash).toLocaleString("en-IN")}`],
+        ["UPI", `Rs. ${Number(revenueByPaymentMethod.session.upi).toLocaleString("en-IN")}`],
+        ["Card", `Rs. ${Number(revenueByPaymentMethod.session.card).toLocaleString("en-IN")}`],
+      ];
+      y = drawCardSection("Session Revenue By Payment Mode", sessionRevenueRows, y);
+
+      const cafeRevenueRows = [
+        ["Total", `Rs. ${Number(revenueByPaymentMethod.cafe.total).toLocaleString("en-IN")}`],
+        ["Cash", `Rs. ${Number(revenueByPaymentMethod.cafe.cash).toLocaleString("en-IN")}`],
+        ["UPI", `Rs. ${Number(revenueByPaymentMethod.cafe.upi).toLocaleString("en-IN")}`],
+        ["Card", `Rs. ${Number(revenueByPaymentMethod.cafe.card).toLocaleString("en-IN")}`],
+      ];
+      y = drawCardSection("Cafe Revenue By Payment Mode", cafeRevenueRows, y);
+    }
+
     const pageRange = doc.bufferedPageRange();
     for (let i = 0; i < pageRange.count; i++) {
       doc.switchToPage(pageRange.start + i);
@@ -935,6 +1030,26 @@ const monthlyCustomerReportPdf = async (req, res) => {
   } catch (error) {
     if (!res.headersSent) {
       return res.status(500).json({ message: error.message || "Unable to generate monthly report PDF" });
+    }
+    res.end();
+  }
+};
+
+const dailyCustomerReportPdf = async (req, res) => {
+  try {
+    const parsed = parseDateQuery(req, res);
+    if (!parsed) return;
+
+    const report = await getDailyReportData(parsed.date);
+    renderCustomerReportPdf(res, {
+      reportTitle: "Daily Customer Report",
+      periodLabel: report.date,
+      filename: `Customer_Report_${report.date}.pdf`,
+      report,
+    });
+  } catch (error) {
+    if (!res.headersSent) {
+      return res.status(500).json({ message: error.message || "Unable to generate daily report PDF" });
     }
     res.end();
   }
@@ -986,6 +1101,8 @@ const yearlyCustomerReportPdf = async (req, res) => {
 module.exports = {
   fetchcustomers,
   dashboardStats,
+  dailyCustomerReport,
+  dailyCustomerReportPdf,
   monthlyCustomerReport,
   monthlyCustomerReportPdf,
   yearlyCustomerReport,

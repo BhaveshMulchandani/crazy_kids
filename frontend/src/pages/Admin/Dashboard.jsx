@@ -106,6 +106,17 @@ export default function Dashboard() {
   const cancelledSessionsTotal = Number(stats.cancelledSessions?.total || 0);
   const cancelledSessionsToday = Number(stats.cancelledSessions?.today || 0);
 
+  // Session/Cafe Revenue segregated by payment mode (cash/upi/card) — see
+  // backend/services/revenue.service.js. `.total` on each reconciles with
+  // the existing "Total Revenue From Sessions"/"Total Revenue From Cafe"
+  // figures already shown in the Monthly/Yearly reports (same
+  // charges.sessionTotal/cafeTotal fields); this only adds the payment-mode
+  // split and a "today" figure on top, neither of which existed before.
+  const sessionRevenueByMethod = stats.sessionRevenue || { total: 0, cash: 0, upi: 0, card: 0 };
+  const cafeRevenueByMethod = stats.cafeRevenue || { total: 0, cash: 0, upi: 0, card: 0 };
+  const todaySessionRevenue = Number(stats.today?.sessionRevenue?.total || 0);
+  const todayCafeRevenue = Number(stats.today?.cafeRevenue?.total || 0);
+
   const activeSessions = stats.activeSessions || [];
   const expiringSessions = activeSessions.filter(
     (s) => new Date(s.scheduledEndTime).getTime() - now < 10 * 60_000,
@@ -221,6 +232,62 @@ export default function Dashboard() {
           hint={`${cancelledSessionsToday} today`}
           icon={Ban}
           accent="oklch(0.62 0.23 25)"
+        />
+      </div>
+
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 lg:gap-5">
+        <StatCard
+          label="Session Revenue"
+          value={`₹${Number(sessionRevenueByMethod.total).toLocaleString()}`}
+          hint={`₹${todaySessionRevenue.toLocaleString()} today`}
+          icon={IndianRupee}
+          accent="var(--primary)"
+        />
+        <StatCard
+          label="Session Revenue — Cash"
+          value={`₹${Number(sessionRevenueByMethod.cash).toLocaleString()}`}
+          icon={IndianRupee}
+          accent="oklch(0.65 0.18 145)"
+        />
+        <StatCard
+          label="Session Revenue — UPI"
+          value={`₹${Number(sessionRevenueByMethod.upi).toLocaleString()}`}
+          icon={IndianRupee}
+          accent="oklch(0.58 0.21 260)"
+        />
+        <StatCard
+          label="Session Revenue — Card"
+          value={`₹${Number(sessionRevenueByMethod.card).toLocaleString()}`}
+          icon={IndianRupee}
+          accent="oklch(0.72 0.16 200)"
+        />
+      </div>
+
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 lg:gap-5">
+        <StatCard
+          label="Cafe Revenue"
+          value={`₹${Number(cafeRevenueByMethod.total).toLocaleString()}`}
+          hint={`₹${todayCafeRevenue.toLocaleString()} today`}
+          icon={Coffee}
+          accent="oklch(0.62 0.23 25)"
+        />
+        <StatCard
+          label="Cafe Revenue — Cash"
+          value={`₹${Number(cafeRevenueByMethod.cash).toLocaleString()}`}
+          icon={Coffee}
+          accent="oklch(0.65 0.18 145)"
+        />
+        <StatCard
+          label="Cafe Revenue — UPI"
+          value={`₹${Number(cafeRevenueByMethod.upi).toLocaleString()}`}
+          icon={Coffee}
+          accent="oklch(0.58 0.21 260)"
+        />
+        <StatCard
+          label="Cafe Revenue — Card"
+          value={`₹${Number(cafeRevenueByMethod.card).toLocaleString()}`}
+          icon={Coffee}
+          accent="oklch(0.72 0.16 200)"
         />
       </div>
 
