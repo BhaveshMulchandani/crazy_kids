@@ -13,6 +13,7 @@ import {
   Tag,
   Percent,
   CalendarCheck,
+  Ban,
 } from "lucide-react";
 import {
   LineChart,
@@ -102,6 +103,8 @@ export default function Dashboard() {
   const totalOrders = Number(stats.totals?.totalOrders || 0);
   const repeat = Number(stats.repeatCustomers || 0);
   const newCustomers = Number(stats.newCustomersThisWeek || 0);
+  const cancelledSessionsTotal = Number(stats.cancelledSessions?.total || 0);
+  const cancelledSessionsToday = Number(stats.cancelledSessions?.today || 0);
 
   const activeSessions = stats.activeSessions || [];
   const expiringSessions = activeSessions.filter(
@@ -211,6 +214,13 @@ export default function Dashboard() {
           value={totalOrders}
           icon={Receipt}
           accent="oklch(0.78 0.17 75)"
+        />
+        <StatCard
+          label="Cancelled Sessions"
+          value={cancelledSessionsTotal}
+          hint={`${cancelledSessionsToday} today`}
+          icon={Ban}
+          accent="oklch(0.62 0.23 25)"
         />
       </div>
 

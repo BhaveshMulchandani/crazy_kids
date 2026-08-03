@@ -8,9 +8,31 @@ let mainWindow;
 // manually — invoices always go to the receipt printer, KOTs always go to
 // the kitchen printer.
 const PRINTER_NAMES = {
-  invoice: "EPSON TM-T82X Receipt6",
+  invoice: "EPSON TM-T82X",
   kot: "Kitchen_Print",
 };
+
+// Windows driver installs frequently register a printer under a name that
+// only *contains* the configured name (e.g. "EPSON TM-T82X Receipt6" for a
+// configured "EPSON TM-T82X") — an exact-only match silently fell through
+// to the system default printer whenever that happened, which is what
+// looked like "auto-select isn't working" (no error, just the wrong
+// printer). Tries, in order: exact match, case-insensitive exact match,
+// case-insensitive substring match either direction. Still falls back to
+// undefined (system default) if nothing matches at all.
+function findPrinter(printers, deviceName) {
+  const exact = printers.find((p) => p.name === deviceName);
+  if (exact) return exact;
+
+  const target = deviceName.toLowerCase();
+  const ciExact = printers.find((p) => p.name.toLowerCase() === target);
+  if (ciExact) return ciExact;
+
+  return printers.find((p) => {
+    const name = p.name.toLowerCase();
+    return name.includes(target) || target.includes(name);
+  });
+}
 
 // Renders `html` in an off-screen window and sends it straight to
 // `deviceName` with no OS print dialog. Used for both invoice and KOT
@@ -32,7 +54,7 @@ async function silentPrintHtml(html, { deviceName, pageSize }) {
     await printWindow.loadURL(dataUrl);
 
     const printers = await printWindow.webContents.getPrintersAsync();
-    const matched = printers.find((p) => p.name === deviceName);
+    const matched = findPrinter(printers, deviceName);
     if (!matched) {
       console.warn(
         `[print] Configured printer "${deviceName}" not found; using system default instead.`
@@ -44,7 +66,10 @@ async function silentPrintHtml(html, { deviceName, pageSize }) {
         {
           silent: true,
           printBackground: true,
-          ...(matched ? { deviceName } : {}),
+          // Electron's print() needs the printer's real registered name —
+          // matched.name may differ from the configured deviceName when a
+          // fuzzy (substring) match was used above.
+          ...(matched ? { deviceName: matched.name } : {}),
           margins: { marginType: "none" },
           pageSize,
         },

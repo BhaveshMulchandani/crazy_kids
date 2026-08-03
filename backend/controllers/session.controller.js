@@ -777,6 +777,45 @@ const extendsession = async (req, res) => {
   }
 };
 
+// Cancels a booked/running/paused session — status only flips to
+// "cancelled", nothing is deleted. No invoice is generated, no billing
+// calculation happens, and any KOTs already placed against this session stay
+// exactly as they are (still linked via kot.session, never removed) — the
+// spec is explicit that session/cafe order data must be fully preserved.
+// Excluding it from bookedsession/runningsession is automatic: those
+// queries already filter to status "booked" / "running"/"paused", so a
+// cancelled session simply stops matching once its status changes here.
+const cancelsession = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const session = await sessionmodel.findById(id);
+
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    if (session.status === "completed" || session.status === "cancelled") {
+      return res.status(400).json({ message: "Session is already closed" });
+    }
+
+    session.status = "cancelled";
+    session.cancelledAt = new Date();
+    await session.save();
+    await Notification.updateMany(
+      { session: session._id, resolved: false },
+      { resolved: true, read: true }
+    );
+
+    return res.status(200).json({
+      message: "Session cancelled successfully",
+      session,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 const completesession = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1130,5 +1169,5 @@ const searchBillingCustomer = async (req, res) => {
 
 
 module.exports = {
-  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, settlePendingPayment, runningsession, recentCompletedSessions, getSessionKOTs, pauseChild, resumeChild
+  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, cancelsession, settlePendingPayment, runningsession, recentCompletedSessions, getSessionKOTs, pauseChild, resumeChild
 };

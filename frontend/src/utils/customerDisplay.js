@@ -18,3 +18,29 @@ export const getDisplayName = (entity) => {
   // never blank.
   return firstChildName || "Guest";
 };
+
+// KOT-only: always the first child's name, never parentName, regardless of
+// how many children are on the session — a group booking's children[0].name
+// is already the representative child (mirrored at session-creation time),
+// so no special-casing is needed for that case.
+export const getKotDisplayName = (entity) => {
+  const children = Array.isArray(entity?.children) ? entity.children : [];
+  const firstChildName = String(children[0]?.name ?? "").trim();
+  return firstChildName || "Guest";
+};
+
+// Invoice-only: { label, value } for the customer-identity line. Never reads
+// parentName. A single child (or a group booking, which has exactly one
+// representative name) shows just that name; multiple children show every
+// name, comma-joined, since the invoice has no single "the" child to pick.
+export const getInvoiceDisplayName = (entity) => {
+  const repName = String(entity?.groupBooking?.representativeChildName ?? "").trim();
+  const children = Array.isArray(entity?.children) ? entity.children : [];
+  const names = repName
+    ? [repName]
+    : children.map((child) => String(child?.name ?? "").trim()).filter(Boolean);
+
+  return names.length <= 1
+    ? { label: "Child Name", value: names[0] || "Guest" }
+    : { label: "Child Name(s)", value: names.join(", ") };
+};

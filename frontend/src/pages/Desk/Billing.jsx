@@ -383,14 +383,18 @@ function BillingPage() {
 
     const mappedChildren = (selectedCustomer.children || []).map((child) => {
       const dob = child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "";
-      // Age Category defaults from the child's DOB (below/above 3 years) so
-      // returning customers don't require re-selection — still fully
-      // editable via the Above/Below 3y buttons below.
+      // Age Category is the source of truth (see billing.service.js — DOB is
+      // optional and doesn't drive billing), so the customer's actual saved
+      // ageCategory always wins here. DOB-derived category is only a
+      // fallback for legacy records saved before ageCategory existed —
+      // without it, any returning customer with no DOB on file (common for
+      // membership signups) lost their Above/Below 3y selection on re-search
+      // even though the backend had it on file all along.
       const age = dob ? ageInYears(dob) : null;
       return {
         name: child.name || "",
         dob,
-        ageCategory: age === null ? "" : age < 3 ? "below_3" : "above_3",
+        ageCategory: child.ageCategory || (age === null ? "" : age < 3 ? "below_3" : "above_3"),
         gender: child.gender || "not_specified",
         socksOpted: false,
       };

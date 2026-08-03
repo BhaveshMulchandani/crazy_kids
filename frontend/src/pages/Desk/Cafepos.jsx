@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "react-router-dom";
-import { getDisplayName } from "../../utils/customerDisplay";
+import { getDisplayName, getKotDisplayName } from "../../utils/customerDisplay";
+import { CafeReceiptMarkup } from "../../components/CafeReceipt";
+import { printCafeReceipt } from "../../utils/cafeReceiptPrint";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -132,38 +134,18 @@ function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
 
   const kotNumber = kot.kotNumber ?? kot._id ?? "—";
   const sessionNumber = customer?.sessionNumber ?? "—";
-  const parentName = customer ? getDisplayName(customer) : "—";
+  // KOT must never show Parent Name — child name only (first child for a
+  // multi-child session, the representative child for a group booking).
+  const parentName = customer ? getKotDisplayName(customer) : "—";
   const createdAt = kot.createdAt ? new Date(kot.createdAt) : new Date();
   const total = cartSnapshot.reduce((sum, item) => sum + item.qty * item.price, 0);
 
   // Prints straight to the fixed kitchen printer (Kitchen_Print, see
   // electron/main.js) with no OS print dialog whenever running inside the
-  // Electron shell. Plain-browser dev/preview (no window.electronAPI) keeps
-  // the previous popup + window.print() behavior. The receipt markup/format
-  // itself is untouched — only how it gets to paper changes. `box-sizing`
-  // is added so the 8px body padding sits inside the declared 72mm width
-  // instead of adding to it (the same right-edge overflow that clipped the
-  // invoice column).
-  const print = () => {
-    const html = document.getElementById("cafe-receipt")?.innerHTML ?? "";
-    const fullHtml = `<html><head><title>KOT ${kotNumber}</title><style>*{box-sizing:border-box}@page{size:80mm auto;margin:4mm} body{font-family:'Courier New',monospace;width:72mm;font-size:12px;color:#000;font-weight:700;padding:8px}.row{display:flex;justify-content:space-between}.hr{border-top:1px dashed #000;margin:6px 0}.center{text-align:center}body, body *{color:#000 !important;-webkit-text-stroke:0.25px #000}</style></head><body>${html}</body></html>`;
-
-    if (window.electronAPI?.printKOT) {
-      window.electronAPI.printKOT(fullHtml).then((result) => {
-        if (!result?.printed) {
-          toast.error(`KOT print failed${result?.error ? `: ${result.error}` : ""}`);
-        }
-      });
-      return;
-    }
-
-    const w = window.open("", "_blank", "width=420,height=700");
-    if (!w) return;
-    w.document.write(fullHtml);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 250);
-  };
+  // Electron shell — shared with the KOT-history reprint feature in
+  // Runningbills.jsx via components/CafeReceipt.jsx, so both always render
+  // and print through the exact same code.
+  const print = () => printCafeReceipt({ kotNumber });
 
   return (
     <Dialog open={!!kot} onOpenChange={(o) => !o && onClose()}>
@@ -171,43 +153,15 @@ function ReceiptDialog({ kot, customer, cartSnapshot, tableNumber, onClose }) {
         <DialogHeader>
           <DialogTitle>Order placed · KOT #{kotNumber}</DialogTitle>
         </DialogHeader>
-        <div id="cafe-receipt" style={{ fontFamily: "'Courier New', monospace", fontSize: 12, color: "#000", padding: 8 }}>
-          <div className="text-center" style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>CRAZIKIDS CAFE</div>
-            <div>KOT #{kotNumber}</div>
-            <div>{createdAt.toLocaleString()}</div>
-          </div>
-          <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Session</span>
-            <span>{sessionNumber}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Customer</span>
-            <span>{parentName}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Table</span>
-            <span>{tableNumber || "—"}</span>
-          </div>
-          <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
-          {cartSnapshot.map((item, index) => (
-            <div key={index} style={{ marginBottom: 6 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>{item.qty}× {item.name}</span>
-                <span>₹{item.qty * item.price}</span>
-              </div>
-              {item.notes && <div style={{ fontSize: 11, color: "#444", paddingLeft: 8 }}>* {item.notes}</div>}
-            </div>
-          ))}
-          <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 14 }}>
-            <span>TOTAL</span>
-            <span>₹{total}</span>
-          </div>
-          <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
-          <div style={{ textAlign: "center", marginTop: 4 }}>Thank you!</div>
-        </div>
+        <CafeReceiptMarkup
+          kotNumber={kotNumber}
+          sessionNumber={sessionNumber}
+          customerName={parentName}
+          tableNumber={tableNumber}
+          createdAt={createdAt}
+          items={cartSnapshot}
+          total={total}
+        />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button onClick={print} style={{ background: "var(--primary)" }}>

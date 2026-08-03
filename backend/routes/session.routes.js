@@ -13,6 +13,7 @@ router.patch('/pause/:id',authmiddleware.isLoggedInAsDesk,sessioncontroller.paus
 router.patch('/extend/:id',authmiddleware.isLoggedInAsDesk,sessioncontroller.extendsession)
 router.patch('/resume/:id',authmiddleware.isLoggedInAsDesk,sessioncontroller.resumesession)
 router.patch("/complete/:id",authmiddleware.isLoggedInAsDesk,sessioncontroller.completesession);
+router.patch("/cancel/:id",authmiddleware.isLoggedInAsDesk,sessioncontroller.cancelsession);
 router.patch("/settle-payment/:id",authmiddleware.isLoggedInAsDesk,sessioncontroller.settlePendingPayment);
 router.patch('/pause-child/:id/:index',authmiddleware.isLoggedInAsDesk,sessioncontroller.pauseChild)
 router.patch('/resume-child/:id/:index',authmiddleware.isLoggedInAsDesk,sessioncontroller.resumeChild)

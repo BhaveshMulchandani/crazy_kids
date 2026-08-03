@@ -265,6 +265,15 @@ const sessionSchema = new mongoose.Schema(
       default: null,
     },
 
+    // Set only when an operator cancels a booked/running/paused session (see
+    // cancelsession). Kept alongside the untouched session/cafe data purely
+    // as a record of when the cancellation happened — the session and its
+    // KOTs are never deleted, only the status flips to "cancelled".
+    cancelledAt: {
+      type: Date,
+      default: null,
+    },
+
     // Hours
 
     bookedHours: {

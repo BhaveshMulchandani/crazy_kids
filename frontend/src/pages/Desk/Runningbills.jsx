@@ -19,12 +19,21 @@ import {
   ChevronDown,
   MessageCircle,
   Loader2,
+  Trash2,
+  Pencil,
+  Plus,
+  Minus,
+  Save,
+  X,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { toCanvas } from "html-to-image";
 import jsPDF from "jspdf";
-import { getDisplayName } from "../../utils/customerDisplay";
+import { getDisplayName, getInvoiceDisplayName, getKotDisplayName } from "../../utils/customerDisplay";
+import ConfirmDialog from "../../components/ConfirmDialog";
+import { CafeReceiptMarkup } from "../../components/CafeReceipt";
+import { printCafeReceipt } from "../../utils/cafeReceiptPrint";
 
 // Helper functions
 const elapsedSeconds = (bill) => {
@@ -520,6 +529,373 @@ const Row = ({ k, v, bold, accent }) => (
   </div>
 );
 
+// Small notes textarea matching the look of the Input component above —
+// not worth a whole new shared primitive for one usage.
+const NotesField = ({ value, onChange, disabled }) => (
+  <textarea
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    disabled={disabled}
+    placeholder="Remarks / notes…"
+    rows={1}
+    className="mt-1 flex w-full rounded-md border border-input bg-transparent px-2 py-1 text-xs shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+  />
+);
+
+// One cafe order (KOT): view mode shows items + remarks exactly as placed,
+// with Reprint / Edit / Delete order actions. Edit mode turns the same
+// items list into an editable draft (qty stepper, per-item delete, add-item
+// picker, notes) that's only persisted on Save via PATCH /cafe/kot/:id —
+// mirrors the existing Cafepos "build a cart, then submit once" pattern.
+// `onChanged` is the parent's loadSessions() — it refreshes both `bills`
+// and `kotsBySession`, which is the single hook every downstream total
+// (card tiles, Checkout dialog, the eventual invoice) already derives from
+// live, so nothing else needs to recompute anything by hand.
+const CafeOrderCard = ({ kot, orderIndex, bill, menu, onChanged }) => {
+  const [editing, setEditing] = useState(false);
+  const [draftItems, setDraftItems] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [addMenuId, setAddMenuId] = useState("");
+  const [addQty, setAddQty] = useState(1);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [printing, setPrinting] = useState(false);
+
+  const startEdit = () => {
+    setDraftItems(
+      (kot.items || []).map((item) => ({
+        _id: item._id,
+        menuItem: item.menuItem,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity || 1,
+        notes: item.notes || "",
+      })),
+    );
+    setAddMenuId("");
+    setAddQty(1);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => setEditing(false);
+
+  const setDraftQty = (index, delta) =>
+    setDraftItems((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)),
+    );
+
+  const setDraftNotes = (index, notes) =>
+    setDraftItems((prev) => prev.map((item, idx) => (idx === index ? { ...item, notes } : item)));
+
+  const removeDraftItem = (index) => setDraftItems((prev) => prev.filter((_, idx) => idx !== index));
+
+  const addDraftItem = () => {
+    const menuItem = menu.find((m) => m.id === addMenuId);
+    if (!menuItem) {
+      toast.error("Pick a menu item to add");
+      return;
+    }
+    const quantity = Math.max(1, Number(addQty) || 1);
+    setDraftItems((prev) => [
+      ...prev,
+      { menuItem: menuItem.id, name: menuItem.name, price: menuItem.price, quantity, notes: "" },
+    ]);
+    setAddMenuId("");
+    setAddQty(1);
+  };
+
+  const save = async () => {
+    if (draftItems.length === 0) {
+      toast.error("An order needs at least one item — use Delete order to remove the whole order instead");
+      return;
+    }
+    setSaving(true);
+    try {
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/cafe/kot/${kot._id}`,
+        {
+          items: draftItems.map((item) => ({
+            _id: item._id,
+            menuItem: item.menuItem,
+            quantity: item.quantity,
+            notes: item.notes,
+          })),
+        },
+        { withCredentials: true },
+      );
+      toast.success("Order updated");
+      setEditing(false);
+      await onChanged?.();
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to update order");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      await axios.delete(`${import.meta.env.VITE_API_URL}/cafe/kot/${kot._id}`, { withCredentials: true });
+      toast.success("Order deleted");
+      setConfirmDeleteOpen(false);
+      await onChanged?.();
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to delete order");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const reprint = () => {
+    setPrinting(true);
+    // Renders the hidden receipt markup for exactly one tick, then prints
+    // it — mirrors the just-placed receipt in Cafepos.jsx via the shared
+    // components/CafeReceipt.jsx, so the reprint is guaranteed identical
+    // (same code, not a re-implementation) rather than approximated.
+    requestAnimationFrame(() => {
+      printCafeReceipt({ elementId: `cafe-reprint-${kot._id}`, kotNumber: kot.kotNumber || kot._id });
+      setPrinting(false);
+    });
+  };
+
+  const draftTotal = draftItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const availableMenu = menu.filter((m) => m.available !== false);
+
+  return (
+    <div className="rounded-xl border border-border/60 p-3">
+      <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+        <span className="font-mono">Order #{orderIndex + 1} · {kot.kotNumber || kot._id}</span>
+        <span>{kot.createdAt ? new Date(kot.createdAt).toLocaleString() : ""}</span>
+      </div>
+
+      {!editing ? (
+        <>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-muted-foreground">
+                <th className="pb-1 text-left font-medium">Item</th>
+                <th className="pb-1 text-right font-medium">Qty</th>
+                <th className="pb-1 text-right font-medium">Price</th>
+                <th className="pb-1 text-right font-medium">Total</th>
+                <th className="pb-1 text-left font-medium pl-2">Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(kot.items || []).map((item, itemIndex) => (
+                <tr key={item._id || itemIndex}>
+                  <td className="py-0.5 align-top">{item.name}</td>
+                  <td className="py-0.5 text-right align-top">{item.quantity}</td>
+                  <td className="py-0.5 text-right align-top">{formatCurrency(item.price)}</td>
+                  <td className="py-0.5 text-right align-top font-medium">{formatCurrency(item.total)}</td>
+                  <td className="py-0.5 pl-2 align-top text-muted-foreground">{item.notes || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-1.5 flex items-center justify-between border-t border-dashed border-border/60 pt-1.5">
+            <div className="flex gap-1.5">
+              <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={startEdit}>
+                <Pencil className="h-3 w-3 mr-1" /> Edit
+              </Button>
+              <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={reprint} disabled={printing}>
+                <Printer className="h-3 w-3 mr-1" /> Reprint KOT
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                className="h-7 px-2 text-xs"
+                onClick={() => setConfirmDeleteOpen(true)}
+              >
+                <Trash2 className="h-3 w-3 mr-1" /> Delete order
+              </Button>
+            </div>
+            <span className="text-xs font-semibold">Order total: {formatCurrency(kot.totalAmount)}</span>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-2">
+          {draftItems.map((item, index) => (
+            <div key={item._id || `new-${index}`} className="rounded-lg border border-border/60 bg-secondary/30 p-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium">{item.name}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {formatCurrency(item.price)} × {item.quantity} = {formatCurrency(item.price * item.quantity)}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button type="button" size="icon" variant="outline" className="h-6 w-6" onClick={() => setDraftQty(index, -1)}>
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                  <span className="w-5 text-center text-xs font-semibold">{item.quantity}</span>
+                  <Button type="button" size="icon" variant="outline" className="h-6 w-6" onClick={() => setDraftQty(index, 1)}>
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                  <Button type="button" size="icon" variant="ghost" className="h-6 w-6" onClick={() => removeDraftItem(index)}>
+                    <Trash2 className="h-3 w-3 text-destructive" />
+                  </Button>
+                </div>
+              </div>
+              <NotesField value={item.notes} onChange={(notes) => setDraftNotes(index, notes)} />
+            </div>
+          ))}
+
+          <div className="flex items-center gap-1.5 rounded-lg border border-dashed border-border/60 p-2">
+            <select
+              value={addMenuId}
+              onChange={(e) => setAddMenuId(e.target.value)}
+              className="h-7 min-w-0 flex-1 rounded-md border border-input bg-transparent px-1.5 text-xs"
+            >
+              <option value="">Add item…</option>
+              {availableMenu.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} · {formatCurrency(m.price)}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min={1}
+              value={addQty}
+              onChange={(e) => setAddQty(e.target.value)}
+              className="h-7 w-14 rounded-md border border-input bg-transparent px-1.5 text-xs"
+            />
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={addDraftItem}>
+              <Plus className="h-3 w-3 mr-1" /> Add
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-xs font-semibold">Draft total: {formatCurrency(draftTotal)}</span>
+            <div className="flex gap-1.5">
+              <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={cancelEdit} disabled={saving}>
+                <X className="h-3 w-3 mr-1" /> Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                style={{ background: "var(--primary)" }}
+                onClick={save}
+                disabled={saving}
+              >
+                {saving ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Save className="h-3 w-3 mr-1" />} Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Off-screen — exists only so Reprint can read its innerHTML through
+          the exact same pipeline the just-placed receipt uses. Never shown. */}
+      <div style={{ position: "absolute", left: -9999, top: -9999 }} aria-hidden="true">
+        <CafeReceiptMarkup
+          elementId={`cafe-reprint-${kot._id}`}
+          kotNumber={kot.kotNumber || kot._id}
+          sessionNumber={bill.sessionNumber}
+          customerName={getKotDisplayName(bill)}
+          tableNumber={kot.tableNumber}
+          createdAt={kot.createdAt ? new Date(kot.createdAt) : new Date()}
+          items={(kot.items || []).map((item) => ({ name: item.name, qty: item.quantity, price: item.price, notes: item.notes }))}
+          total={kot.totalAmount}
+        />
+      </div>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title="Delete this order?"
+        message={`This removes order ${kot.kotNumber || kot._id} and its items from the bill. This cannot be undone.`}
+        confirmLabel="Delete order"
+        loading={deleting}
+        onCancel={() => !deleting && setConfirmDeleteOpen(false)}
+        onConfirm={confirmDelete}
+      />
+    </div>
+  );
+};
+
+// Full cafe order history for one session — every KOT ever placed against
+// it (kots is already the complete, session-scoped list from
+// getSessionKOTs, same source calculateFoodCharge already sums), not just
+// the latest order. Works identically for normal/membership/group bookings
+// since none of this branches on session type. Each order can be edited,
+// deleted, or reprinted in place — see CafeOrderCard above. `onChanged`
+// (the parent's loadSessions()) is what makes every downstream total
+// correct again after an edit; nothing here recomputes billing itself.
+const CafeOrdersDialog = ({ bill, kots, onClose, onChanged }) => {
+  const [menu, setMenu] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/menu/getall`, { withCredentials: true })
+      .then((response) => {
+        if (cancelled) return;
+        const apiMenu = response?.data?.menu ?? response?.data ?? [];
+        if (Array.isArray(apiMenu)) {
+          setMenu(
+            apiMenu.map((item) => ({
+              id: item._id ?? item.id,
+              name: item.name,
+              price: Number(item.price),
+              available: item.available ?? true,
+            })),
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!bill) return null;
+
+  const orders = [...kots].sort(
+    (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0),
+  );
+  const grandTotal = orders.reduce((sum, kot) => sum + Number(kot?.totalAmount || 0), 0);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto bg-white">
+        <DialogHeader>
+          <DialogTitle>Cafe orders · {getDisplayName(bill)}</DialogTitle>
+        </DialogHeader>
+        {orders.length === 0 ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">
+            No cafe orders placed for this session yet.
+          </div>
+        ) : (
+          <div className="space-y-3 text-sm">
+            {orders.map((kot, orderIndex) => (
+              <CafeOrderCard
+                key={kot._id || orderIndex}
+                kot={kot}
+                orderIndex={orderIndex}
+                bill={bill}
+                menu={menu}
+                onChanged={onChanged}
+              />
+            ))}
+            <div className="flex items-center justify-between rounded-xl bg-secondary/40 p-3 text-sm font-bold">
+              <span>Cafe Total ({orders.length} order{orders.length === 1 ? "" : "s"})</span>
+              <span>{formatCurrency(grandTotal)}</span>
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const PAYMENT_MODE_OPTIONS = [
   { value: "cash", label: "Cash" },
   { value: "upi", label: "UPI" },
@@ -585,6 +961,8 @@ const BillCard = ({
   onPauseChild,
   onResumeChild,
   onSettlePayment,
+  onCafeTotal,
+  onCancel,
   pricingSettings,
   kotsBySession,
   highlighted,
@@ -756,12 +1134,17 @@ const BillCard = ({
             {formatCurrency(sessionCharge.total)}
           </div>
         </div>
-        <div className="rounded-lg border border-border/60 bg-white p-1.5">
+        <button
+          type="button"
+          onClick={() => onCafeTotal?.(bill)}
+          title="View full cafe order history"
+          className="rounded-lg border border-border/60 bg-white p-1.5 cursor-pointer transition-colors hover:border-primary/50 hover:bg-secondary/40"
+        >
           <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Cafe</div>
           <div className="text-sm font-bold tabular-nums">
             {formatCurrency(foodCharge.total)}
           </div>
-        </div>
+        </button>
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-1.5">
           <div className="text-[10px] font-medium uppercase tracking-wide text-primary/80">Total</div>
           <div className="text-sm font-bold tabular-nums text-primary">{formatCurrency(total)}</div>
@@ -886,6 +1269,17 @@ const BillCard = ({
               <Receipt className="h-3.5 w-3.5 mr-1" /> Checkout
             </Button>
           </>
+        )}
+
+        {onCancel && (
+          <Button
+            size="sm"
+            variant="destructive"
+            title="Cancel this session"
+            onClick={() => onCancel(bill)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
         )}
       </div>
     </div>
@@ -1426,6 +1820,8 @@ const InvoiceDialog = ({ invoice, onClose }) => {
   const end = sessionDetails?.endTime ? new Date(sessionDetails.endTime) : null;
   const durMin = sessionDetails?.actualDurationMinutes || 0;
   const loyaltyPoints = Number(charges?.loyaltyPoints ?? calculateLoyaltyPoints(charges?.grandTotal || 0, {}));
+  // Invoice must never show Parent Name — child name(s) only.
+  const invoiceIdentity = getInvoiceDisplayName(invoice);
 
   return (
     <Dialog open={!!invoice} onOpenChange={(o) => !o && onClose()}>
@@ -1477,7 +1873,7 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               fontSize: 11.5,
             }}
           >
-            <div><span style={{ color: INVOICE_MUTED }}>Parent Name / Guardian Name</span><br />{getDisplayName({ parentName: customer.parentName || invoice.parentName, children: ch })} · {customer.mobileNumber || invoice.mobileNumber}</div>
+            <div><span style={{ color: INVOICE_MUTED }}>{invoiceIdentity.label}</span><br />{invoiceIdentity.value} · {customer.mobileNumber || invoice.mobileNumber}</div>
             <div><span style={{ color: INVOICE_MUTED }}>Band</span><br />{customer.bandNumber || invoice.bandNumber || "—"}</div>
             <div><span style={{ color: INVOICE_MUTED }}>Session</span><br />{customer.sessionNumber || invoice.sessionNumber || "—"}</div>
             {customer.city && <div><span style={{ color: INVOICE_MUTED }}>City</span><br />{customer.city}</div>}
@@ -1704,6 +2100,9 @@ function SessionsPage() {
   const [, force] = useState(0);
   const [checkoutBillId, setCheckoutBillId] = useState(null);
   const [finalInvoice, setFinalInvoice] = useState(null);
+  const [cafeOrdersBillId, setCafeOrdersBillId] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
   const [bills, setBills] = useState([]);
   const [recentlyClosed, setRecentlyClosed] = useState([]);
   const [pricingSettings, setPricingSettings] = useState(null);
@@ -1862,6 +2261,31 @@ function SessionsPage() {
     } catch (error) {
       console.log(error);
       toast.error(error.response?.data?.message || "Failed to resume session");
+    }
+  };
+
+  // Cancelling only flips session.status to "cancelled" on the backend —
+  // session and cafe order data are never deleted, so no local list beyond
+  // the Running Session screen (bills, driven by loadSessions()) needs to
+  // change. Confirmation is handled by the shared ConfirmDialog, same
+  // pattern used elsewhere in the app for destructive actions.
+  const confirmCancelSession = async () => {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    try {
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/session/cancel/${cancelTarget._id}`,
+        {},
+        { withCredentials: true },
+      );
+      toast.success("Session cancelled");
+      setCancelTarget(null);
+      await loadSessions();
+    } catch (error) {
+      console.log(error);
+      toast.error(error.response?.data?.message || "Failed to cancel session");
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -2041,6 +2465,8 @@ function SessionsPage() {
                 onPauseChild={(index) => pauseChild(b, index)}
                 onResumeChild={(index) => resumeChild(b, index)}
                 onSettlePayment={(method) => settlePayment(b, method)}
+                onCafeTotal={(bill) => setCafeOrdersBillId(bill._id)}
+                onCancel={(bill) => setCancelTarget(bill)}
                 pricingSettings={pricingSettings}
                 kotsBySession={kotsBySession}
                 highlighted={b._id === highlightId}
@@ -2078,6 +2504,8 @@ function SessionsPage() {
                 onPauseChild={(index) => pauseChild(b, index)}
                 onResumeChild={(index) => resumeChild(b, index)}
                 onSettlePayment={(method) => settlePayment(b, method)}
+                onCafeTotal={(bill) => setCafeOrdersBillId(bill._id)}
+                onCancel={(bill) => setCancelTarget(bill)}
                 pricingSettings={pricingSettings}
                 kotsBySession={kotsBySession}
                 highlighted={b._id === highlightId}
@@ -2153,6 +2581,24 @@ function SessionsPage() {
       <InvoiceDialog
         invoice={finalInvoice}
         onClose={() => setFinalInvoice(null)}
+      />
+      {cafeOrdersBillId && (
+        <CafeOrdersDialog
+          bill={bills.find((b) => b._id === cafeOrdersBillId)}
+          kots={kotsBySession?.[cafeOrdersBillId] || []}
+          onClose={() => setCafeOrdersBillId(null)}
+          onChanged={loadSessions}
+        />
+      )}
+      <ConfirmDialog
+        open={!!cancelTarget}
+        title="Cancel this session?"
+        message="Are you sure you want to cancel this session?"
+        confirmLabel="Cancel session"
+        cancelLabel="Keep session"
+        loading={cancelling}
+        onCancel={() => !cancelling && setCancelTarget(null)}
+        onConfirm={confirmCancelSession}
       />
     </div>
   );

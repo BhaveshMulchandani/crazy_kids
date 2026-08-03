@@ -48,7 +48,7 @@ const dashboardStats = async (req, res) => {
     const trendStart = startOfDay(new Date(today.getTime() - 13 * 24 * 60 * 60 * 1000));
     const tz = tzOffsetString(now);
 
-    const [facetResult, activeSessions] = await Promise.all([
+    const [facetResult, activeSessions, cancelledTotal, cancelledToday] = await Promise.all([
       Invoice.aggregate([
         {
           $facet: {
@@ -178,6 +178,8 @@ const dashboardStats = async (req, res) => {
         .sort({ scheduledEndTime: 1 })
         .limit(50)
         .lean(),
+      sessionmodel.countDocuments({ status: "cancelled" }),
+      sessionmodel.countDocuments({ status: "cancelled", cancelledAt: { $gte: today } }),
     ]);
 
     const facets = facetResult[0];
@@ -228,6 +230,7 @@ const dashboardStats = async (req, res) => {
       bestSellingCafeItems: facets.bestSellingCafeItems,
       revenueByArea,
       activeSessions,
+      cancelledSessions: { total: cancelledTotal, today: cancelledToday },
     });
   } catch (error) {
     return res.status(500).json({ message: error.message || "Unable to load dashboard stats" });
