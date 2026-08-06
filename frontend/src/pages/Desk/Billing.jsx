@@ -17,6 +17,13 @@ import { getDisplayName } from "../../utils/customerDisplay";
 
 const API_BASE = `${import.meta.env.VITE_API_URL}`;
 
+// Normalizes free-text identity fields (parent/guardian name, child names,
+// area, city) to lowercase before they're saved — the operator can still
+// type in any case on screen, only the saved value is normalized. Prevents
+// "Vapi" / "VAPI" / "vapi" from being counted as distinct entries in
+// area/city analytics and customer reports.
+const toSavedCase = (value) => String(value || "").trim().toLowerCase();
+
 // pricing settings are managed centrally; Billing only needs socks flag
 
 // Helper function to calculate age in years
@@ -579,10 +586,10 @@ function BillingPage() {
       const balanceAmount = Math.max(estimatedCharge.total - paidAmount, 0);
 
       const sharedPayload = {
-        parentName,
+        parentName: toSavedCase(parentName),
         mobileNumber: mobile,
-        area,
-        city,
+        area: toSavedCase(area),
+        city: toSavedCase(city),
         bandNumber,
 
         reference,
@@ -611,7 +618,7 @@ function BillingPage() {
             isGroupBooking: true,
             groupBooking: {
               isBirthday: isBirthdayGroupBooking,
-              representativeChildName: groupRepresentativeChildName.trim(),
+              representativeChildName: toSavedCase(groupRepresentativeChildName),
               totalChildren: Number(groupTotalChildren),
               aboveThreeCount: Number(groupAboveThreeCount),
               belowThreeCount: Number(groupBelowThreeCount),
@@ -628,7 +635,7 @@ function BillingPage() {
             children: validChildren
               .filter((c) => c.name.trim())
               .map((c) => ({
-                name: c.name.trim(),
+                name: toSavedCase(c.name),
                 dob: c.dob || null,
                 ageCategory: c.ageCategory,
                 gender: c.gender || "not_specified",

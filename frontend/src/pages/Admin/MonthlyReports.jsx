@@ -248,6 +248,7 @@ function MonthlyReports() {
             <SummaryCard label="Customers Visited" value={report.summary.totalCustomers} />
             <SummaryCard label="Total Visits" value={report.summary.totalVisits} />
             <SummaryCard label="Total Revenue" value={`₹${Number(report.summary.totalRevenue).toLocaleString()}`} />
+            <SummaryCard label="Revenue From Membership" value={`₹${Number(report.summary.totalRevenueFromMembership).toLocaleString()}`} />
             <SummaryCard label="Reward Points Issued" value={report.summary.totalRewardPoints} />
             <SummaryCard label="Amount Collected" value={`₹${Number(report.summary.totalAmountCollected).toLocaleString()}`} />
             <SummaryCard label="Pending Amount" value={`₹${Number(report.summary.totalPendingAmount).toLocaleString()}`} />
@@ -256,12 +257,22 @@ function MonthlyReports() {
           {report.revenueByPaymentMethod && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
               <div className="surface-card p-5">
-                <h3 className="font-semibold mb-3">Session Revenue by Payment Mode</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <SummaryCard label="Total" value={`₹${Number(report.revenueByPaymentMethod.session.total).toLocaleString()}`} />
-                  <SummaryCard label="Cash" value={`₹${Number(report.revenueByPaymentMethod.session.cash).toLocaleString()}`} />
-                  <SummaryCard label="UPI" value={`₹${Number(report.revenueByPaymentMethod.session.upi).toLocaleString()}`} />
-                  <SummaryCard label="Card" value={`₹${Number(report.revenueByPaymentMethod.session.card).toLocaleString()}`} />
+                <h3 className="font-semibold mb-3">Session & Membership Revenue by Payment Mode</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {["cash", "upi", "card"].map((method) => {
+                    const sessionAmount = Number(report.revenueByPaymentMethod.session[method] || 0);
+                    const membershipAmount = Number(report.revenueByPaymentMethod.membership?.[method] || 0);
+                    return (
+                      <div key={method} className="space-y-2">
+                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          {method === "upi" ? "UPI" : method[0].toUpperCase() + method.slice(1)}
+                        </div>
+                        <SummaryCard label="Session Revenue" value={`₹${sessionAmount.toLocaleString()}`} />
+                        <SummaryCard label="Membership Revenue" value={`₹${membershipAmount.toLocaleString()}`} />
+                        <SummaryCard label="Total" value={`₹${(sessionAmount + membershipAmount).toLocaleString()}`} />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               <div className="surface-card p-5">

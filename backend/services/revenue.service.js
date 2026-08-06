@@ -39,24 +39,34 @@ const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
 const emptyBucket = () => ({ total: 0, cash: 0, upi: 0, card: 0 });
 
-// `invoices` — lean docs shaped { charges: { sessionTotal, cafeTotal },
-// payment: { breakdown, method } }. Returns
-// { session: {total,cash,upi,card}, cafe: {total,cash,upi,card} }.
+// `invoices` — lean docs shaped { charges: { sessionTotal, cafeTotal,
+// membershipPurchaseTotal }, payment: { breakdown, method } }. Returns
+// { session: {total,cash,upi,card}, cafe: {total,cash,upi,card},
+//   membership: {total,cash,upi,card} }.
+//
+// membership uses the same per-invoice payment-method ratios as
+// session/cafe above — a membership purchased alongside/within a session's
+// invoice settles via that same payment.breakdown, so it's split the same
+// way for consistency, not tracked separately.
 const aggregateRevenueByMethod = (invoices) => {
   const session = emptyBucket();
   const cafe = emptyBucket();
+  const membership = emptyBucket();
 
   for (const invoice of invoices) {
     const sessionTotal = Number(invoice.charges?.sessionTotal || 0);
     const cafeTotal = Number(invoice.charges?.cafeTotal || 0);
+    const membershipTotal = Number(invoice.charges?.membershipPurchaseTotal || 0);
     const ratios = methodRatiosForInvoice(invoice);
 
     session.total += sessionTotal;
     cafe.total += cafeTotal;
+    membership.total += membershipTotal;
 
     for (const { method, ratio } of ratios) {
       session[method] += sessionTotal * ratio;
       cafe[method] += cafeTotal * ratio;
+      membership[method] += membershipTotal * ratio;
     }
   }
 
@@ -67,7 +77,7 @@ const aggregateRevenueByMethod = (invoices) => {
     card: round(bucket.card),
   });
 
-  return { session: roundBucket(session), cafe: roundBucket(cafe) };
+  return { session: roundBucket(session), cafe: roundBucket(cafe), membership: roundBucket(membership) };
 };
 
 module.exports = { aggregateRevenueByMethod };

@@ -7,7 +7,7 @@ const { aggregateRevenueByMethod } = require("../services/revenue.service");
 // below (dashboard lifetime/today, and each report's date range) — kept in
 // one place so the field list backing aggregateRevenueByMethod can't drift
 // between call sites.
-const REVENUE_INVOICE_FIELDS = "charges.sessionTotal charges.cafeTotal payment.breakdown payment.method";
+const REVENUE_INVOICE_FIELDS = "charges.sessionTotal charges.cafeTotal charges.membershipPurchaseTotal payment.breakdown payment.method";
 
 const startOfDay = (date = new Date()) => {
   const d = new Date(date);
@@ -449,14 +449,24 @@ const getCustomerReportDataForRange = async (start, end) => {
           rewardPoints: { $sum: "$charges.loyaltyPoints" },
           sessionTotal: { $sum: "$charges.sessionTotal" },
           cafeTotal: { $sum: "$charges.cafeTotal" },
+          membershipPurchaseTotal: { $sum: "$charges.membershipPurchaseTotal" },
           socksQty: { $sum: "$charges.socksQty" },
           parentName: { $last: "$customer.parentName" },
           customerId: { $last: "$customer.sessionNumber" },
           area: { $last: "$customer.area" },
           city: { $last: "$customer.city" },
-          offerName: { $last: "$offer.name" },
-          membershipApplied: { $last: "$membership.applied" },
-          membershipName: { $last: "$membership.planName" },
+          // One entry per invoice (= one visit) in this period, so the
+          // offer/membership applied on THAT specific visit can be shown
+          // against the right visit number below — a single $last value
+          // can't tell visit 2's offer apart from visit 5's.
+          visitOfferHistory: {
+            $push: {
+              date: "$createdAt",
+              offerName: "$offer.name",
+              membershipApplied: "$membership.applied",
+              membershipName: "$membership.planName",
+            },
+          },
           childNameLists: { $push: "$children.name" },
           // Payment settlement — carried on the invoice as of completion
           // time (see session.controller.js completesession), not
@@ -474,14 +484,13 @@ const getCustomerReportDataForRange = async (start, end) => {
           rewardPoints: 1,
           sessionTotal: 1,
           cafeTotal: 1,
+          membershipPurchaseTotal: 1,
           socksQty: 1,
           parentName: 1,
           customerId: 1,
           area: 1,
           city: 1,
-          offerName: 1,
-          membershipApplied: 1,
-          membershipName: 1,
+          visitOfferHistory: 1,
           amountPaid: 1,
           pendingAmount: 1,
           paymentBreakdownLists: 1,
@@ -564,9 +573,20 @@ const getCustomerReportDataForRange = async (start, end) => {
       ...(invoiceRow?.childNames || []),
     ]);
 
-    const offerOrMembership = invoiceRow?.membershipApplied
-      ? invoiceRow?.membershipName || "Membership"
-      : invoiceRow?.offerName || "-";
+    // Per-visit breakdown: one "Visit N: <offer/membership or ->" line per
+    // invoice in this period, oldest first, numbered 1..N to line up with
+    // how many visits this customer made in the period (visits count itself
+    // is untouched — still visitRow?.visits below — this only labels each
+    // of those visits correctly instead of collapsing them to one value).
+    const offerMembershipVisits = [...(invoiceRow?.visitOfferHistory || [])]
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map((entry, index) => ({
+        visit: index + 1,
+        label: entry.membershipApplied ? entry.membershipName || "Membership" : entry.offerName || "-",
+      }));
+    const offerOrMembership = offerMembershipVisits.length
+      ? offerMembershipVisits.map((v) => `Visit ${v.visit}: ${v.label}`).join("\n")
+      : "-";
 
     // Method(s) that actually settled this customer's invoices in the
     // period — flattened across every invoice's payment.breakdown (each
@@ -588,12 +608,14 @@ const getCustomerReportDataForRange = async (start, end) => {
       area: invoiceRow?.area || "-",
       city: invoiceRow?.city || "-",
       offerOrMembership,
+      offerMembershipVisits,
       childNames: [...childNames],
       visits: visitRow?.visits || 0,
       rewardPoints: invoiceRow?.rewardPoints || 0,
       totalSpent: invoiceRow?.totalSpent || 0,
       sessionTotal: invoiceRow?.sessionTotal || 0,
       cafeTotal: invoiceRow?.cafeTotal || 0,
+      membershipTotal: invoiceRow?.membershipPurchaseTotal || 0,
       socksQty: invoiceRow?.socksQty || 0,
       amountPaid: invoiceRow?.amountPaid || 0,
       pendingAmount: invoiceRow?.pendingAmount || 0,
@@ -610,6 +632,11 @@ const getCustomerReportDataForRange = async (start, end) => {
       acc.totalRewardPoints += c.rewardPoints;
       acc.totalRevenueFromSessions += c.sessionTotal;
       acc.totalRevenueFromCafe += c.cafeTotal;
+      // Already folded into totalRevenue above (via charges.grandTotal) —
+      // this just breaks that same figure out into its own line, same as
+      // totalRevenueFromSessions/totalRevenueFromCafe do. Nothing about
+      // totalRevenue itself changes.
+      acc.totalRevenueFromMembership += c.membershipTotal;
       acc.totalSocksIssued += c.socksQty;
       // Additive only — totalRevenue above is unchanged ("billed" amount,
       // regardless of payment status, same as before). These two just
@@ -626,6 +653,7 @@ const getCustomerReportDataForRange = async (start, end) => {
       totalRewardPoints: 0,
       totalRevenueFromSessions: 0,
       totalRevenueFromCafe: 0,
+      totalRevenueFromMembership: 0,
       totalSocksIssued: 0,
       totalAmountCollected: 0,
       totalPendingAmount: 0,
@@ -737,7 +765,12 @@ const formatGeneratedOn = (date) =>
 // same columns, same summary/revenue cards, same pagination; only the title
 // line, period label, and filename differ between the two callers below.
 const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, report }) => {
-  const { customers, summary, revenueByCity, revenueByArea, paymentMethodBreakdown, pendingPayments, revenueByPaymentMethod } = report;
+  // revenueByCity/paymentMethodBreakdown/pendingPayments are still returned
+  // by getCustomerReportDataForRange (and the JSON report endpoints) —
+  // they're just no longer rendered as PDF cards (Revenue By City /
+  // Payment Settlement were removed below), so they're not destructured
+  // here anymore.
+  const { customers, summary, revenueByArea, revenueByPaymentMethod } = report;
 
     // Landscape — the report now carries 13 columns (area + city +
     // offer/membership + the session/cafe/socks breakdown added on top of
@@ -755,18 +788,20 @@ const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, repo
     // except childNames which is allowed to wrap across multiple lines
     // (rows below size themselves to whichever is tallest).
     const columns = [
-      { key: "customerId", label: "Customer ID", width: 55, align: "left" },
+      { key: "customerId", label: "Customer ID", width: 50, align: "left" },
       { key: "childNames", label: "Child Name(s)", width: 92, align: "left", wrap: true },
       { key: "parentName", label: "Parent Name / Guardian Name", width: 96, align: "left" },
-      { key: "mobileNumber", label: "Mobile Number", width: 70, align: "left" },
+      { key: "mobileNumber", label: "Mobile Number", width: 65, align: "left" },
       { key: "area", label: "Area", width: 40, align: "left" },
       { key: "city", label: "City", width: 44, align: "left" },
-      { key: "offerOrMembership", label: "Offer / Membership", width: 72, align: "left" },
+      // Wider + wrapped: shows one "Visit N: <name or ->" line per visit in
+      // the period (see offerOrMembership below), not just one name.
+      { key: "offerOrMembership", label: "Offer / Membership", width: 90, align: "left", wrap: true },
       { key: "visits", label: "Visits", width: 36, align: "right" },
       { key: "sessionTotal", label: "Session Total", width: 58, align: "right" },
       { key: "cafeTotal", label: "Cafe Total", width: 50, align: "right" },
-      { key: "socksQty", label: "Socks Qty", width: 40, align: "right" },
-      { key: "rewardPoints", label: "Points", width: 42, align: "right" },
+      { key: "socksQty", label: "Socks Qty", width: 36, align: "right" },
+      { key: "rewardPoints", label: "Points", width: 38, align: "right" },
       { key: "totalSpent", label: "Total Spent", width: 60, align: "right" },
     ];
     const tableLeft = doc.page.margins.left;
@@ -850,6 +885,7 @@ const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, repo
     y = drawTableHeader(y);
 
     const childNamesCol = columns.find((col) => col.key === "childNames");
+    const offerMembershipCol = columns.find((col) => col.key === "offerOrMembership");
 
     customers.forEach((customer, index) => {
       const cells = {
@@ -869,10 +905,16 @@ const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, repo
       };
 
       doc.font("Helvetica").fontSize(CELL_FONT_SIZE);
-      const wrappedHeight = doc.heightOfString(cells.childNames, {
+      const childNamesHeight = doc.heightOfString(cells.childNames, {
         width: childNamesCol.width - CELL_PAD_X * 2,
       });
-      const rowHeight = Math.max(MIN_ROW_HEIGHT, wrappedHeight + CELL_PAD_Y * 2);
+      // offerOrMembership now carries one line per visit (see
+      // getCustomerReportDataForRange) — a customer with several visits in
+      // the period can need more vertical space than childNames does.
+      const offerMembershipHeight = doc.heightOfString(cells.offerOrMembership, {
+        width: offerMembershipCol.width - CELL_PAD_X * 2,
+      });
+      const rowHeight = Math.max(MIN_ROW_HEIGHT, childNamesHeight + CELL_PAD_Y * 2, offerMembershipHeight + CELL_PAD_Y * 2);
 
       if (y + rowHeight > contentBottom()) {
         doc.addPage();
@@ -946,6 +988,7 @@ const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, repo
       ["Total Revenue", `Rs. ${Number(summary.totalRevenue).toLocaleString("en-IN")}`],
       ["Total Revenue From Sessions", `Rs. ${Number(summary.totalRevenueFromSessions).toLocaleString("en-IN")}`],
       ["Total Revenue From Cafe", `Rs. ${Number(summary.totalRevenueFromCafe).toLocaleString("en-IN")}`],
+      ["Total Revenue From Membership", `Rs. ${Number(summary.totalRevenueFromMembership).toLocaleString("en-IN")}`],
       ["Total Reward Points", String(summary.totalRewardPoints)],
       ["Total Socks Issued", String(summary.totalSocksIssued)],
     ];
@@ -960,42 +1003,31 @@ const renderCustomerReportPdf = (res, { reportTitle, periodLabel, filename, repo
       y = drawCardSection("Revenue By Area", areaRows, y);
     }
 
-    if (revenueByCity.length > 0) {
-      const cityRows = revenueByCity.map(({ city, revenue }) => [
-        city,
-        `Rs. ${Number(revenue).toLocaleString("en-IN")}`,
-      ]);
-      y = drawCardSection("Revenue By City", cityRows, y);
-    }
+    // Revenue By City and Payment Settlement cards were removed from this
+    // report (per request) — the underlying data (revenueByCity,
+    // paymentMethodBreakdown, pendingPayments) is still computed and
+    // returned by getCustomerReportDataForRange/the JSON report endpoints
+    // exactly as before; only these two PDF cards were taken out.
 
-    // Payment settlement — additive card, same drawCardSection used for
-    // Revenue By Area/City above. Doesn't touch totalRevenue or any other
-    // existing figure, just breaks out collected-vs-pending and by which
-    // method the collected portion came in.
-    const settlementRows = [
-      ["Total Collected", `Rs. ${Number(summary.totalAmountCollected).toLocaleString("en-IN")}`],
-      ["Total Pending", `Rs. ${Number(summary.totalPendingAmount).toLocaleString("en-IN")}`],
-      ["Invoices With Pending Balance", String(pendingPayments.invoiceCount)],
-      ...paymentMethodBreakdown.map(({ method, amount }) => [
-        `Collected Via ${method}`,
-        `Rs. ${Number(amount).toLocaleString("en-IN")}`,
-      ]),
-    ];
-    y = drawCardSection("Payment Settlement", settlementRows, y);
-
-    // Session/Cafe Revenue by payment mode — additive cards, same
-    // drawCardSection used above. .total on each reconciles exactly with
-    // "Total Revenue From Sessions"/"Total Revenue From Cafe" in the
-    // Summary card above (same charges.sessionTotal/cafeTotal fields, same
-    // period) — this only adds the cash/upi/card split on top.
+    // Session & Membership Revenue by payment mode — additive card, same
+    // drawCardSection used above. Grouped by payment mode (Cash/UPI/Card),
+    // each with its Session Revenue / Membership Revenue / Total, per
+    // method's .session.total/.membership.total reconciling exactly with
+    // "Total Revenue From Sessions"/"Total Revenue From Membership" in the
+    // Summary card above (same charges.sessionTotal/membershipPurchaseTotal
+    // fields, same period) — this only adds the cash/upi/card split on top.
     if (revenueByPaymentMethod) {
-      const sessionRevenueRows = [
-        ["Total", `Rs. ${Number(revenueByPaymentMethod.session.total).toLocaleString("en-IN")}`],
-        ["Cash", `Rs. ${Number(revenueByPaymentMethod.session.cash).toLocaleString("en-IN")}`],
-        ["UPI", `Rs. ${Number(revenueByPaymentMethod.session.upi).toLocaleString("en-IN")}`],
-        ["Card", `Rs. ${Number(revenueByPaymentMethod.session.card).toLocaleString("en-IN")}`],
-      ];
-      y = drawCardSection("Session Revenue By Payment Mode", sessionRevenueRows, y);
+      const sessionMembershipRows = ["cash", "upi", "card"].flatMap((method) => {
+        const label = REPORT_PAYMENT_METHOD_LABELS[method];
+        const sessionAmount = Number(revenueByPaymentMethod.session[method] || 0);
+        const membershipAmount = Number(revenueByPaymentMethod.membership?.[method] || 0);
+        return [
+          [`${label} - Session Revenue`, `Rs. ${sessionAmount.toLocaleString("en-IN")}`],
+          [`${label} - Membership Revenue`, `Rs. ${membershipAmount.toLocaleString("en-IN")}`],
+          [`${label} - Total`, `Rs. ${(sessionAmount + membershipAmount).toLocaleString("en-IN")}`],
+        ];
+      });
+      y = drawCardSection("Session & Membership Revenue By Payment Mode", sessionMembershipRows, y);
 
       const cafeRevenueRows = [
         ["Total", `Rs. ${Number(revenueByPaymentMethod.cafe.total).toLocaleString("en-IN")}`],
