@@ -12,6 +12,7 @@ const validateOfferPayload = ({ name, type, value, rules }) => {
     "discount",
     "flat_discount",
     "special_pricing",
+    "birthday",
   ];
 
   if (!allowedTypes.includes(type)) {
@@ -44,6 +45,23 @@ const validateOfferPayload = ({ name, type, value, rules }) => {
   if (type === "special_pricing") {
     if (!rules?.day || !rules?.firstHourPrice || !rules?.nextHourPrice) {
       return "Please fill all pricing fields";
+    }
+  }
+
+  if (type === "birthday") {
+    const hours = Number(rules?.hours || 0);
+    const minutes = Number(rules?.minutes || 0);
+    if (!value) {
+      return "Birthday Offer amount is required";
+    }
+    if (!rules?.minKids) {
+      return "Minimum kids required is required";
+    }
+    if (hours <= 0 && minutes <= 0) {
+      return "Please set a duration (hours and/or minutes) for the Birthday Offer";
+    }
+    if (minutes < 0 || minutes > 59) {
+      return "Minutes must be between 0 and 59";
     }
   }
 

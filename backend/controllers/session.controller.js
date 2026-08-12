@@ -111,6 +111,20 @@ const createsession = async (
 
     // City is optional.
 
+    // Resolved once, up front — a Birthday Offer changes how the
+    // group-booking fields immediately below are validated (a group booking
+    // applying a Birthday Offer only ever needs a total headcount, never
+    // the above/below-3-years split every other group booking requires).
+    // Every other use of this offer (Minimum Kids Allowed, session duration)
+    // happens further down, once the child/group headcount is known.
+    let birthdayOfferDoc = null;
+    if (offer && !purchaseMembershipPlan) {
+      const candidateOffer = await Offer.findById(offer);
+      if (candidateOffer?.active && candidateOffer.type === "birthday") {
+        birthdayOfferDoc = candidateOffer;
+      }
+    }
+
     const GENDER_VALUES = ["boy", "girl", "not_specified"];
     let processedChildren;
     let groupBookingData = { isGroup: false };
@@ -121,8 +135,12 @@ const createsession = async (
       // age-bracket pricing already used per-child elsewhere.
       const representativeChildName = String(groupBooking?.representativeChildName || "").trim();
       const totalChildren = Number(groupBooking?.totalChildren);
-      const aboveThreeCount = Number(groupBooking?.aboveThreeCount);
-      const belowThreeCount = Number(groupBooking?.belowThreeCount);
+      // A Birthday Offer group booking only ever needs a total headcount —
+      // the above/below-3-years split (used elsewhere purely for age-based
+      // pricing, which a Birthday Offer never uses — see billing.service.js)
+      // is neither required nor collected, and always stored as 0/0.
+      const aboveThreeCount = birthdayOfferDoc ? 0 : Number(groupBooking?.aboveThreeCount);
+      const belowThreeCount = birthdayOfferDoc ? 0 : Number(groupBooking?.belowThreeCount);
       // Defaults to 0 (not required) — a group booking doesn't have to need
       // socks at all.
       const socksRequired = groupBooking?.socksRequired === undefined || groupBooking?.socksRequired === ""
@@ -135,20 +153,27 @@ const createsession = async (
         });
       }
 
-      if (
-        !Number.isInteger(totalChildren) || totalChildren < 1 ||
-        !Number.isInteger(aboveThreeCount) || aboveThreeCount < 0 ||
-        !Number.isInteger(belowThreeCount) || belowThreeCount < 0
-      ) {
+      if (!Number.isInteger(totalChildren) || totalChildren < 1) {
         return res.status(400).json({
-          message: "Total children, children above 3 years, and children below 3 years must be provided as whole numbers",
+          message: "Total children must be provided as a whole number",
         });
       }
 
-      if (aboveThreeCount + belowThreeCount !== totalChildren) {
-        return res.status(400).json({
-          message: "Children above 3 years plus children below 3 years must equal the total number of children",
-        });
+      if (!birthdayOfferDoc) {
+        if (
+          !Number.isInteger(aboveThreeCount) || aboveThreeCount < 0 ||
+          !Number.isInteger(belowThreeCount) || belowThreeCount < 0
+        ) {
+          return res.status(400).json({
+            message: "Children above 3 years and children below 3 years must be provided as whole numbers",
+          });
+        }
+
+        if (aboveThreeCount + belowThreeCount !== totalChildren) {
+          return res.status(400).json({
+            message: "Children above 3 years plus children below 3 years must equal the total number of children",
+          });
+        }
       }
 
       if (!Number.isInteger(socksRequired) || socksRequired < 0) {
@@ -310,6 +335,36 @@ const createsession = async (
       if (dayOffer) autoOfferId = dayOffer._id;
     }
 
+    // Birthday Offer pins this booking's duration to the offer's configured
+    // hours+minutes (instead of the usual 1-hour default) and requires the
+    // booking to meet the offer's Minimum Kids Allowed — checked here (using
+    // the offer resolved up-front, above) now that the child/group headcount
+    // is known. Enforced at booking time rather than deferred to checkout —
+    // the session's duration/scheduledEndTime is fixed the moment it starts
+    // (see startsession), so it must already reflect the birthday duration
+    // by then, and an ineligible booking must never be allowed to attach the
+    // offer at all (see billing.service.js's offerConditionsMet, which is
+    // only a defense-in-depth backstop for this same rule). A day-based
+    // auto-offer (autoOfferId, above) can never be a Birthday Offer — it
+    // only matches on rules.day, which a Birthday Offer never sets — so
+    // there's nothing to re-check there.
+    if (birthdayOfferDoc) {
+      const childCountForOffer = groupBookingData.isGroup
+        ? groupBookingData.totalChildren
+        : processedChildren.length;
+      const minKids = Number(birthdayOfferDoc.rules?.minKids || 0);
+      if (childCountForOffer < minKids) {
+        return res.status(400).json({
+          message: `Birthday Offer "${birthdayOfferDoc.name}" requires at least ${minKids} kids. This booking has ${childCountForOffer}.`,
+        });
+      }
+    }
+
+    const birthdayHours = birthdayOfferDoc
+      ? Number(birthdayOfferDoc.rules?.hours || 0) + Number(birthdayOfferDoc.rules?.minutes || 0) / 60
+      : null;
+    const initialTotalHours = birthdayHours && birthdayHours > 0 ? birthdayHours : BOOKING_HOURS;
+
     const session =
       await sessionmodel.create({
         sessionNumber,
@@ -366,9 +421,9 @@ const createsession = async (
 
         amountPaid: Number(amountPaid) || 0,
 
-        bookedHours: 1,
+        bookedHours: initialTotalHours,
         extendedHours: 0,
-        totalHours: 1,
+        totalHours: initialTotalHours,
 
         status: "booked",
       });
@@ -707,6 +762,18 @@ const extendsession = async (req, res) => {
       });
     }
 
+    // A Birthday Offer session runs for exactly the duration configured on
+    // the offer (see createsession) and must never be extended — the flat
+    // birthday amount already covers that fixed duration and nothing more.
+    if (session.offer) {
+      const offer = await Offer.findById(session.offer);
+      if (offer?.type === "birthday") {
+        return res.status(400).json({
+          message: "Birthday Offer sessions cannot be extended.",
+        });
+      }
+    }
+
     // A membership-linked session must never be extended past the hours the
     // customer actually has left — remainingPlayHours only gets decremented
     // once, at checkout (see completesession below), so it still reflects
@@ -860,13 +927,14 @@ const completesession = async (req, res) => {
       const actualDurationMinutes = startTime ? Math.max(0, Math.round((session.actualEndTime - startTime) / 60000)) : 0;
       const pointsPer100 = Number(settings?.loyaltyPointsPer100 ?? 10);
       // Birthday sessions (a child's dob matches today) earn loyalty points
-      // normally like any other session. Only two cases are exempt: a
-      // membership-covered session (already prepaid, no cash session charge
-      // to earn points on) and a "Birthday Group Booking" (see
-      // groupBooking.isBirthday in session.model.js — group bookings have no
-      // per-child dob to derive a birthday from, so this is the explicit
-      // operator-selected equivalent).
-      const loyaltyPointsExempt = calculation.membershipApplied || Boolean(session.groupBooking?.isBirthday);
+      // normally like any other session. Exempt cases: a membership-covered
+      // session (already prepaid, no cash session charge to earn points on),
+      // a "Birthday Group Booking" (see groupBooking.isBirthday in
+      // session.model.js — group bookings have no per-child dob to derive a
+      // birthday from, so this is the explicit operator-selected
+      // equivalent), and a Birthday OFFER session (calculation.birthdayApplied
+      // — a distinct feature from the two above; see billing.service.js).
+      const loyaltyPointsExempt = calculation.membershipApplied || calculation.birthdayApplied || Boolean(session.groupBooking?.isBirthday);
       const loyaltyPoints = loyaltyPointsExempt ? 0 : Math.floor(calculation.grandTotal / 100) * pointsPer100;
       // Date.now() collides if two sessions complete within the same
       // millisecond, crashing checkout on the unique invoiceNumber index.

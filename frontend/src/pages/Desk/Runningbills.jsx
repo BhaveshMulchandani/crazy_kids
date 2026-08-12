@@ -63,6 +63,7 @@ const OFFER_TYPE_LABELS = {
   flat_discount: "Flat Amount Discount",
   special_pricing: "Special Pricing",
   membership: "Membership",
+  birthday: "Birthday Offer",
 };
 const offerTypeLabel = (type) => OFFER_TYPE_LABELS[type] || type || "—";
 
@@ -154,6 +155,14 @@ const calculateSessionCharge = (bill, pricingSettings) => {
     offer?.type === "special_pricing" &&
     String(offer.rules?.day || "").toLowerCase() === dayName(new Date()).toLowerCase();
 
+  // Computed before breakdown/subtotal below — a Birthday Offer prices every
+  // child at a flat ₹-per-child rate (never first-hour/extension, never an
+  // above/below-3-years split — a group booking applying a Birthday Offer
+  // only ever collects a total headcount, see session.controller.js) once
+  // the booking meets the offer's Minimum Kids Allowed.
+  const offerConditionsMet = offer && childCount >= Number(offer.rules?.minKids || Infinity);
+  const birthdayApplied = offer?.type === "birthday" && offerConditionsMet;
+
   const rateFor = (isUnder3) => {
     const normalFirst = isUnder3
       ? Number(pricingSettings?.firstHourUnder3 ?? 0)
@@ -166,39 +175,50 @@ const calculateSessionCharge = (bill, pricingSettings) => {
     return firstHourRate + Math.max((bill?.totalHours ?? 1) - 1, 0) * extensionRate;
   };
 
-  // Per-row breakdown for display — two summary rows (above/below 3y) for a
-  // group booking, one row per named child otherwise.
-  const breakdown = groupBooking
-    ? [
-        Number(groupBooking.aboveThreeCount || 0) > 0 && {
-          name: `Children above 3 years (${groupBooking.aboveThreeCount})`,
-          age: null,
-          amount: round2(Number(groupBooking.aboveThreeCount || 0) * rateFor(false)),
-        },
-        Number(groupBooking.belowThreeCount || 0) > 0 && {
-          name: `Children below 3 years (${groupBooking.belowThreeCount})`,
-          age: null,
-          amount: round2(Number(groupBooking.belowThreeCount || 0) * rateFor(true)),
-        },
-      ].filter(Boolean)
-    : children.map((child) => ({
-        name: child?.name || "",
-        age: child?.age ?? null,
-        // Pricing bracket comes from the operator-selected ageCategory, not
-        // DOB — falls back to the legacy age-based check only for sessions
-        // booked before ageCategory existed (see billing.service.js).
-        amount: round2(
-          rateFor(
-            child?.ageCategory
-              ? child.ageCategory === "below_3"
-              : (child?.age ?? 0) < 3,
+  // Per-row breakdown for display — mirrors billing.service.js's
+  // childCharges exactly: a Birthday Offer applied to a group booking is a
+  // single "Children (N)" summary row, a Birthday Offer applied to named
+  // children is one row per child (each at the full per-child rate), two
+  // summary rows (above/below 3y) for any other group booking, one row per
+  // named child otherwise.
+  const breakdown = birthdayApplied
+    ? (groupBooking
+        ? [{ name: `Children (${childCount})`, age: null, amount: round2(childCount * Number(offer.value || 0)) }]
+        : children.map((child) => ({ name: child?.name || "", age: child?.age ?? null, amount: round2(Number(offer.value || 0)) })))
+    : groupBooking
+      ? [
+          Number(groupBooking.aboveThreeCount || 0) > 0 && {
+            name: `Children above 3 years (${groupBooking.aboveThreeCount})`,
+            age: null,
+            amount: round2(Number(groupBooking.aboveThreeCount || 0) * rateFor(false)),
+          },
+          Number(groupBooking.belowThreeCount || 0) > 0 && {
+            name: `Children below 3 years (${groupBooking.belowThreeCount})`,
+            age: null,
+            amount: round2(Number(groupBooking.belowThreeCount || 0) * rateFor(true)),
+          },
+        ].filter(Boolean)
+      : children.map((child) => ({
+          name: child?.name || "",
+          age: child?.age ?? null,
+          // Pricing bracket comes from the operator-selected ageCategory, not
+          // DOB — falls back to the legacy age-based check only for sessions
+          // booked before ageCategory existed (see billing.service.js).
+          amount: round2(
+            rateFor(
+              child?.ageCategory
+                ? child.ageCategory === "below_3"
+                : (child?.age ?? 0) < 3,
+            ),
           ),
-        ),
-      }));
+        }));
 
   const subtotal = round2(breakdown.reduce((total, row) => total + row.amount, 0));
 
-  const offerConditionsMet = offer && childCount >= Number(offer.rules?.minKids || Infinity);
+  // For a Birthday Offer, subtotal already IS the applied charge (childCount
+  // × per-child amount, see breakdown above) — there's no separate "normal"
+  // price to discount from, so discountAmount stays 0 and total below just
+  // passes subtotal straight through, exactly like billing.service.js.
   let discountAmount = 0;
   if (offer?.type === "discount" && offerConditionsMet) {
     discountAmount = round2((subtotal * Number(offer.value || 0)) / 100);
@@ -211,7 +231,7 @@ const calculateSessionCharge = (bill, pricingSettings) => {
     total: round2(Math.max(subtotal - discountAmount, 0)),
     membershipApplied: false,
     discountAmount,
-    offer: discountAmount > 0 || specialDayMatches ? offer : null,
+    offer: discountAmount > 0 || specialDayMatches || birthdayApplied ? offer : null,
     breakdown,
   };
 };
@@ -264,6 +284,11 @@ const calculateLoyaltyPoints = (amount, pricingSettings) => {
   return Math.floor(Number(amount || 0) / 100) * pointsPer100;
 };
 
+// Cafe pricing is completely untouched by a Birthday Offer's selected
+// food/benefit items — those are only a descriptive "what's included in
+// this package" configuration on the offer, never a billing override. A
+// parent ordering the same item from Cafe POS is charged the normal cafe
+// price exactly as before, so this stays a plain sum of the KOTs.
 const calculateFoodCharge = (bill) => {
   const kots = bill?.kots ?? [];
   const subtotal = kots.reduce(
@@ -1251,14 +1276,22 @@ const BillCard = ({
               Add cafe
             </Button>
 
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex-1"
-              onClick={onExtend}
-            >
-              <Clock className="h-3.5 w-3.5 mr-1" /> Extend 1 hr
-            </Button>
+            {/* Birthday Offer sessions run for exactly the duration
+                configured on the offer and are never extendable (see
+                session.controller.js:extendsession) — the button simply
+                doesn't render rather than rendering disabled-with-a-reason,
+                consistent with how other status-gated actions in this row
+                (Start/Pause/Resume) already only render when applicable. */}
+            {bill.offer?.type !== "birthday" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1"
+                onClick={onExtend}
+              >
+                <Clock className="h-3.5 w-3.5 mr-1" /> Extend 1 hr
+              </Button>
+            )}
 
             <Button
               size="sm"
@@ -1320,11 +1353,13 @@ const CheckoutDialog = ({
   const total = preDiscountTotal - extraDiscountAmount;
   const paymentSummary = getSessionPaymentSummary(bill, { total });
   // No loyalty points at all when any child in the session has their
-  // birthday today — mirrors the same exemption billing.service.js applies
-  // at checkout, so this preview never shows points the confirmed invoice
-  // won't actually award.
+  // birthday today, or when a Birthday Offer is applied to this session —
+  // mirrors the same exemptions session.controller.js:completesession
+  // applies at checkout, so this preview never shows points the confirmed
+  // invoice won't actually award.
   const hasBirthdayChild = (bill?.children || []).some((child) => isBirthdayChild(child));
-  const loyaltyPoints = hasBirthdayChild ? 0 : calculateLoyaltyPoints(total, pricingSettings);
+  const isBirthdayOfferBill = bill?.offer?.type === "birthday";
+  const loyaltyPoints = (hasBirthdayChild || isBirthdayOfferBill) ? 0 : calculateLoyaltyPoints(total, pricingSettings);
 
   if (!bill) return null;
 
@@ -1450,7 +1485,7 @@ const CheckoutDialog = ({
             {paymentSummary.paymentMethodLabel && (
               <Row k="Payment Completed Using" v={paymentSummary.paymentMethodLabel} />
             )}
-            <Row k="Loyalty Points Earned" v={loyaltyPoints.toString()} />
+            {!isBirthdayOfferBill && <Row k="Loyalty Points Earned" v={loyaltyPoints.toString()} />}
           </div>
 
           {extraDiscountAmount > 0 && (
@@ -2031,9 +2066,11 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               </div>
             )}
 
-            <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 6, paddingTop: 4 }}>
-              <InvoiceRow label="Loyalty Points Earned" value={loyaltyPoints} />
-            </div>
+            {invoice.offer?.type !== "birthday" && (
+              <div style={{ borderTop: `1px solid ${INVOICE_BORDER}`, marginTop: 6, paddingTop: 4 }}>
+                <InvoiceRow label="Loyalty Points Earned" value={loyaltyPoints} />
+              </div>
+            )}
 
             <div
               style={{

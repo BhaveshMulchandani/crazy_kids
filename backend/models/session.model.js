@@ -276,10 +276,14 @@ const sessionSchema = new mongoose.Schema(
 
     // Hours
 
+    // min is 1 minute, not 1 hour — a Birthday Offer's configured duration
+    // (hours + minutes, see offer.controller.js) can be shorter than a full
+    // hour, and totalHours/bookedHours carry that duration as a decimal
+    // (e.g. 2.5 for 2h 30m) instead of the usual whole-hour value.
     bookedHours: {
       type: Number,
       default: 1,
-      min: 1,
+      min: 1 / 60,
     },
 
     extendedHours: {
@@ -291,7 +295,7 @@ const sessionSchema = new mongoose.Schema(
     totalHours: {
       type: Number,
       default: 1,
-      min: 1,
+      min: 1 / 60,
     },
 
     extensions: [extensionSchema],

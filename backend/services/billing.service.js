@@ -67,8 +67,46 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount,
     return { firstHourCharge, extensionRate };
   };
 
+  // Computed before childCharges below — a Birthday Offer prices every child
+  // at a flat ₹-per-child rate (never first-hour/extension, never an
+  // above/below-3-years split) only once the booking meets the offer's
+  // Minimum Kids Allowed (createsession already enforces this at booking
+  // time; this is the checkout-time backstop for the same rule).
+  const offerConditionsMet = offer && childCount >= Number(offer.rules?.minKids || Infinity);
+  const birthdayApplied = offer?.type === "birthday" && offerConditionsMet;
+
   let childCharges;
-  if (groupBooking) {
+  if (birthdayApplied) {
+    const birthdayRate = Number(offer.value || 0);
+    // A group booking applying a Birthday Offer only ever collects a total
+    // headcount (see session.controller.js/session.model.js) — never an
+    // above/below-3-years split — so this is a single summary row, not two.
+    childCharges = groupBooking
+      ? [{
+          name: `Children (${childCount})`,
+          dob: null,
+          age: null,
+          gender: "not_specified",
+          firstHourCharge: birthdayRate,
+          extensionHours: 0,
+          extensionRate: 0,
+          childTotal: round(childCount * birthdayRate),
+          socksOpted: false,
+          groupCount: childCount,
+        }]
+      : children.map((child) => ({
+          name: child.name || "",
+          dob: child.dob || null,
+          age: Number(child.age || 0),
+          ageCategory: child.ageCategory || null,
+          gender: child.gender || "not_specified",
+          firstHourCharge: birthdayRate,
+          extensionHours: 0,
+          extensionRate: 0,
+          childTotal: round(birthdayRate),
+          socksOpted: Boolean(child.socksOpted),
+        }));
+  } else if (groupBooking) {
     // Priced entirely from the above/below-3 headcount rather than
     // iterating individual children — same per-head first-hour/extension
     // rates as a normal booking, just multiplied by count instead of
@@ -109,8 +147,11 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount,
       return { name: child.name || "", dob: child.dob || null, age: Number(child.age || 0), ageCategory: child.ageCategory || null, gender: child.gender || "not_specified", firstHourCharge, extensionHours, extensionRate, childTotal: round(firstHourCharge + extensionHours * extensionRate), socksOpted: Boolean(child.socksOpted) };
     });
   }
+  // For a Birthday Offer, normalSessionTotal already IS the applied charge
+  // (childCount × per-child amount, see above) — there's no separate
+  // "normal" price to discount from, so discountAmount naturally stays 0 and
+  // sessionTotal below just passes normalSessionTotal straight through.
   const normalSessionTotal = round(childCharges.reduce((sum, child) => sum + child.childTotal, 0));
-  const offerConditionsMet = offer && childCount >= Number(offer.rules?.minKids || Infinity);
   let discountAmount = 0;
   if (offer?.type === "discount" && offerConditionsMet) {
     discountAmount = round(normalSessionTotal * Number(offer.value || 0) / 100);
@@ -118,6 +159,11 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount,
     discountAmount = round(Math.min(Number(offer.value || 0), normalSessionTotal));
   }
   const sessionTotal = membershipApplied ? 0 : round(Math.max(normalSessionTotal - discountAmount, 0));
+  // Cafe pricing is completely untouched by a Birthday Offer's selected
+  // food/benefit items — those are only a descriptive "what's included in
+  // this package" configuration on the offer, never a billing override. A
+  // parent ordering the same item from Cafe POS is charged the normal cafe
+  // price exactly as before.
   const cafeItems = (kots || []).flatMap((kot) => (kot.items || []).map((item) => ({ name: item.name || "", quantity: Number(item.quantity || 1), unitPrice: Number(item.price || 0), lineTotal: Number(item.total || 0) })));
   const cafeSubtotal = round(cafeItems.reduce((sum, item) => sum + item.lineTotal, 0));
   const cafeGST = round(cafeSubtotal * 0.05);
@@ -145,7 +191,7 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount,
     ? round(preDiscountGrandTotal * (Math.min(rawExtraDiscountValue, 100) / 100))
     : round(Math.min(rawExtraDiscountValue, preDiscountGrandTotal));
   const grandTotal = round(preDiscountGrandTotal - extraDiscountAmount);
-  return { totalHours, extensionHours, childCharges, cafeItems, normalSessionTotal, sessionTotal, cafeSubtotal, cafeGST, cafeTotal, grandTotal, discountAmount, extraDiscountAmount, extraDiscountType: normalizedExtraDiscountType, extraDiscountValue: rawExtraDiscountValue, membershipApplied, membership, specialPricingApplied, offer: offer ? { name: offer.name, type: offer.type, value: offer.value } : null, membershipPurchase, socksQty, socksRate, socksTotal, groupBooking: groupBooking ? { isBirthday: Boolean(groupBooking.isBirthday), representativeChildName: groupBooking.representativeChildName || "", totalChildren: Number(groupBooking.totalChildren || 0), aboveThreeCount: Number(groupBooking.aboveThreeCount || 0), belowThreeCount: Number(groupBooking.belowThreeCount || 0), socksRequired: Number(groupBooking.socksRequired || 0) } : null };
+  return { totalHours, extensionHours, childCharges, cafeItems, normalSessionTotal, sessionTotal, cafeSubtotal, cafeGST, cafeTotal, grandTotal, discountAmount, extraDiscountAmount, extraDiscountType: normalizedExtraDiscountType, extraDiscountValue: rawExtraDiscountValue, membershipApplied, membership, specialPricingApplied, birthdayApplied, offer: offer ? { name: offer.name, type: offer.type, value: offer.value } : null, membershipPurchase, socksQty, socksRate, socksTotal, groupBooking: groupBooking ? { isBirthday: Boolean(groupBooking.isBirthday), representativeChildName: groupBooking.representativeChildName || "", totalChildren: Number(groupBooking.totalChildren || 0), aboveThreeCount: Number(groupBooking.aboveThreeCount || 0), belowThreeCount: Number(groupBooking.belowThreeCount || 0), socksRequired: Number(groupBooking.socksRequired || 0) } : null };
 };
 
 module.exports = { calculateInvoiceCharges, round, dayName };

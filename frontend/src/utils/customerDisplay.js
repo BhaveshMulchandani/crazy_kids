@@ -19,15 +19,26 @@ export const getDisplayName = (entity) => {
   return firstChildName || "Guest";
 };
 
-// KOT-only: always the first child's name, never parentName, regardless of
-// how many children are on the session — a group booking's children[0].name
-// is already the representative child (mirrored at session-creation time),
-// so no special-casing is needed for that case.
-export const getKotDisplayName = (entity) => {
+// Always the first child's name, never parentName, regardless of how many
+// children are on the session — a group booking's children[0].name is
+// already the representative child (mirrored at session-creation time), so
+// no special-casing is needed for that case. Shared by KOT printing and by
+// the customer/booking/session "search" flows below, which both need
+// exactly the same rule: one child, that name; several children, just the
+// first one — parentName is never used as the displayed name.
+const firstChildOnlyName = (entity) => {
   const children = Array.isArray(entity?.children) ? entity.children : [];
   const firstChildName = String(children[0]?.name ?? "").trim();
   return firstChildName || "Guest";
 };
+
+// KOT-only.
+export const getKotDisplayName = (entity) => firstChildOnlyName(entity);
+
+// Customer/booking/session search results (e.g. the "Returning customer?
+// Find them" search in Billing.jsx, and the session search in Cafepos.jsx) —
+// never parentName, single or first child's name only.
+export const getSearchDisplayName = (entity) => firstChildOnlyName(entity);
 
 // Invoice-only: { label, value } for the customer-identity line. Never reads
 // parentName. A single child (or a group booking, which has exactly one

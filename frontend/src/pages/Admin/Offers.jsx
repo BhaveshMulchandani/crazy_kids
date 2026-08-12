@@ -1,7 +1,7 @@
 import * as React from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeIndianRupee, Gift, Pencil, Percent, Plus, Trash2, Wallet } from "lucide-react";
+import { BadgeIndianRupee, Cake, Gift, Pencil, Percent, Plus, Trash2, Wallet } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
@@ -226,6 +226,7 @@ const iconByType = {
   discount: Percent,
   flat_discount: Wallet,
   special_pricing: BadgeIndianRupee,
+  birthday: Cake,
 };
 
 const typeLabel = {
@@ -233,6 +234,7 @@ const typeLabel = {
   discount: "Percentage Discount",
   flat_discount: "Flat Amount Discount",
   special_pricing: "Special Pricing",
+  birthday: "Birthday Offer",
 };
 
 const defaultRulesByType = {
@@ -254,6 +256,13 @@ const defaultRulesByType = {
     firstHourPrice: 350,
     nextHourPrice: 150,
   },
+  birthday: {
+    minKids: 20,
+    hours: 2,
+    minutes: 30,
+    benefits: ["Play Included"],
+    includedItems: [],
+  },
 };
 
 const offerTypeOptions = [
@@ -261,6 +270,7 @@ const offerTypeOptions = [
   { value: "discount", label: "Percentage Discount" },
   { value: "flat_discount", label: "Flat Amount Discount" },
   { value: "special_pricing", label: "Special Pricing" },
+  { value: "birthday", label: "Birthday Offer" },
 ];
 
 const MembershipFields = ({ value, rules, setValue, setRules, typeSelect }) => (
@@ -455,6 +465,164 @@ const SpecialPricingFields = ({ rules, setRules, typeSelect }) => (
 );
 
 
+// Reuses the existing cafe/menu data (same GET /menu/getall the desk Cafe
+// Menu page reads) instead of a separate duplicate item list — the admin
+// just checks off which of the real menu items are included in the offer.
+const BirthdayFields = ({ value, rules, setValue, setRules, typeSelect }) => {
+  const [menuItems, setMenuItems] = React.useState([]);
+  const [loadingMenu, setLoadingMenu] = React.useState(false);
+
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoadingMenu(true);
+        const response = await axios.get(`${API_BASE}/menu/getall`, { withCredentials: true });
+        if (mounted) setMenuItems(Array.isArray(response.data?.menu) ? response.data.menu : []);
+      } catch {
+        // Non-fatal — the food-items checklist just stays empty; every
+        // other offer field still works.
+      } finally {
+        if (mounted) setLoadingMenu(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const includedIds = new Set((rules.includedItems || []).map((entry) => String(entry.menuItem)));
+
+  const toggleItem = (item) => {
+    const id = String(item._id);
+    const nextIncluded = includedIds.has(id)
+      ? (rules.includedItems || []).filter((entry) => String(entry.menuItem) !== id)
+      : [...(rules.includedItems || []), { menuItem: id, name: item.name }];
+    setRules({ ...rules, includedItems: nextIncluded });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        {typeSelect}
+        <div>
+          <Label>Birthday Offer Amount (₹ per child)</Label>
+          <Input
+            type="number"
+            value={value}
+            onChange={(event) => setValue(Number(event.target.value))}
+            placeholder="950"
+          />
+          <p className="text-xs text-muted-foreground mt-1">Charged as amount × number of kids on the booking.</p>
+        </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div>
+          <Label>Hours</Label>
+          <Input
+            type="number"
+            min="0"
+            value={rules.hours}
+            onChange={(event) => setRules({ ...rules, hours: Number(event.target.value) })}
+            placeholder="2"
+          />
+        </div>
+        <div>
+          <Label>Minutes</Label>
+          <Input
+            type="number"
+            min="0"
+            max="59"
+            value={rules.minutes}
+            onChange={(event) => setRules({ ...rules, minutes: Number(event.target.value) })}
+            placeholder="30"
+          />
+        </div>
+        <div>
+          <Label>Minimum Kids Allowed</Label>
+          <Input
+            type="number"
+            min="1"
+            value={rules.minKids}
+            onChange={(event) => setRules({ ...rules, minKids: Number(event.target.value) })}
+            placeholder="20"
+          />
+        </div>
+      </div>
+      <div className="space-y-2 rounded-xl border border-input bg-muted/20 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium">Benefits</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setRules({ ...rules, benefits: [...(rules.benefits || []), ""] })}
+          >
+            Add Benefit
+          </Button>
+        </div>
+        <div className="space-y-2">
+          {(rules.benefits || []).map((benefit, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <Input
+                className="h-9 min-w-0"
+                value={benefit}
+                onChange={(event) => {
+                  const nextBenefits = [...(rules.benefits || [])];
+                  nextBenefits[index] = event.target.value;
+                  setRules({ ...rules, benefits: nextBenefits });
+                }}
+                placeholder="Play Included"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive"
+                onClick={() => {
+                  const nextBenefits = [...(rules.benefits || [])];
+                  nextBenefits.splice(index, 1);
+                  setRules({ ...rules, benefits: nextBenefits });
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+        <div className="text-xs text-muted-foreground pt-1">
+          Food — select which cafe items this Birthday Offer's package is described as including. This is a benefit
+          description only: a parent ordering the same item from Cafe POS is still charged the normal cafe price.
+        </div>
+        {loadingMenu && <div className="text-xs text-muted-foreground">Loading menu items...</div>}
+        {!loadingMenu && menuItems.length === 0 && (
+          <div className="text-xs text-muted-foreground">No menu items found.</div>
+        )}
+        <div className="grid gap-1.5 sm:grid-cols-2 max-h-56 overflow-y-auto pr-1">
+          {menuItems.map((item) => {
+            const included = includedIds.has(String(item._id));
+            return (
+              <label
+                key={item._id}
+                className={cn(
+                  "flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer",
+                  included ? "border-emerald-400 bg-emerald-50" : "border-input bg-background/60",
+                )}
+              >
+                <span className="min-w-0 truncate">{item.name} <span className="text-xs text-muted-foreground">· ₹{item.price}</span></span>
+                <input
+                  type="checkbox"
+                  checked={included}
+                  onChange={() => toggleItem(item)}
+                  className="h-4 w-4 shrink-0"
+                />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function Offers() {
   const [offers, setOffers] = React.useState([]);
   const [open, setOpen] = React.useState(false);
@@ -484,7 +652,9 @@ function Offers() {
           ? 100
           : nextType === "membership"
             ? 4500
-            : 0,
+            : nextType === "birthday"
+              ? 5000
+              : 0,
     );
   };
 
@@ -533,8 +703,11 @@ function Offers() {
     setRules({
       ...defaultRulesByType[offer.type],
       ...(offer.rules || {}),
-      ...(offer.type === "membership"
+      ...(offer.type === "membership" || offer.type === "birthday"
         ? { benefits: [...(offer.rules?.benefits || [])] }
+        : {}),
+      ...(offer.type === "birthday"
+        ? { includedItems: [...(offer.rules?.includedItems || [])] }
         : {}),
     });
     setOpen(true);
@@ -559,6 +732,13 @@ function Offers() {
       if (!String(rules.day || "").trim()) return "Applicable day is required.";
       if (!(Number(rules.firstHourPrice) > 0)) return "First hour price must be greater than 0.";
       if (!(Number(rules.nextHourPrice) > 0)) return "Additional hour price must be greater than 0.";
+    } else if (type === "birthday") {
+      if (!(Number(value) > 0)) return "Birthday Offer amount must be greater than 0.";
+      if (!(Number(rules.minKids) > 0)) return "Minimum kids allowed must be at least 1.";
+      const hours = Number(rules.hours) || 0;
+      const minutes = Number(rules.minutes) || 0;
+      if (hours <= 0 && minutes <= 0) return "Set a duration (hours and/or minutes) for the Birthday Offer.";
+      if (minutes < 0 || minutes > 59) return "Minutes must be between 0 and 59.";
     }
     return null;
   };
@@ -752,6 +932,28 @@ function Offers() {
                     <div className="text-sm text-muted-foreground">Additional Hour: <span className="font-medium text-foreground">₹{offer.rules.nextHourPrice}</span></div>
                   </div>
                 )}
+                {offer.type === "birthday" && (
+                  <div className="mt-5 space-y-2 text-foreground">
+                    <div className="text-3xl font-semibold tracking-tight">₹{offer.value}<span className="text-base font-medium text-muted-foreground"> / child</span></div>
+                    <div className="text-sm text-muted-foreground">
+                      Duration: <span className="font-medium text-foreground">{offer.rules.hours || 0}h {offer.rules.minutes || 0}m</span>
+                    </div>
+                    <div className="text-sm text-muted-foreground">Minimum Kids: <span className="font-medium text-foreground">{offer.rules.minKids}</span></div>
+                    {(offer.rules.benefits?.length > 0 || offer.rules.includedItems?.length > 0) && (
+                      <div className="space-y-1 rounded-xl bg-background/60 p-3 text-sm">
+                        <div className="font-medium">Benefits</div>
+                        <ul className="list-disc pl-5">
+                          {(offer.rules.benefits || []).map((benefit, index) => (
+                            <li key={`benefit-${index}`}>{benefit}</li>
+                          ))}
+                          {(offer.rules.includedItems || []).map((item, index) => (
+                            <li key={`item-${index}`}>{item.name} — Included</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="mt-6 flex items-center justify-between border-t border-border/60 pt-4">
                 <span className={cn(
@@ -817,6 +1019,9 @@ function Offers() {
             )}
             {type === "special_pricing" && (
               <SpecialPricingFields rules={rules} setRules={setRules} typeSelect={offerTypeSelect} />
+            )}
+            {type === "birthday" && (
+              <BirthdayFields value={value} rules={rules} setValue={setValue} setRules={setRules} typeSelect={offerTypeSelect} />
             )}
           </div>
 

@@ -11,7 +11,7 @@ import {
   Baby,
   UsersRound,
 } from "lucide-react";
-import { getDisplayName } from "../../utils/customerDisplay";
+import { getSearchDisplayName } from "../../utils/customerDisplay";
 
 // Mock data removed — Billing now uses backend session creation
 
@@ -479,19 +479,22 @@ function BillingPage() {
       if (!groupTotalChildren || !Number.isInteger(total) || total < 1) {
         nextErrors.groupTotalChildren = "Enter the total number of children";
       }
-      if (groupAboveThreeCount === "" || !Number.isInteger(above) || above < 0) {
-        nextErrors.groupAboveThreeCount = "Enter children above 3 years";
-      }
-      if (groupBelowThreeCount === "" || !Number.isInteger(below) || below < 0) {
-        nextErrors.groupBelowThreeCount = "Enter children below 3 years";
-      }
-      if (
-        !nextErrors.groupTotalChildren &&
-        !nextErrors.groupAboveThreeCount &&
-        !nextErrors.groupBelowThreeCount &&
-        above + below !== total
-      ) {
-        nextErrors.groupAboveThreeCount = "Above 3 + Below 3 must equal the total number of children";
+
+      if (!isBirthdayOfferSelected) {
+        if (groupAboveThreeCount === "" || !Number.isInteger(above) || above < 0) {
+          nextErrors.groupAboveThreeCount = "Enter children above 3 years";
+        }
+        if (groupBelowThreeCount === "" || !Number.isInteger(below) || below < 0) {
+          nextErrors.groupBelowThreeCount = "Enter children below 3 years";
+        }
+        if (
+          !nextErrors.groupTotalChildren &&
+          !nextErrors.groupAboveThreeCount &&
+          !nextErrors.groupBelowThreeCount &&
+          above + below !== total
+        ) {
+          nextErrors.groupAboveThreeCount = "Above 3 + Below 3 must equal the total number of children";
+        }
       }
 
       // Socks Required is optional (defaults to 0 — a group doesn't have to
@@ -536,6 +539,24 @@ function BillingPage() {
         const kidsAllowed = Number(membershipForValidation.kidsAllowed ?? membershipForValidation.rules?.kidsAllowed ?? 0);
         if (registeredChildren.length + newChildren.size > kidsAllowed) {
           nextErrors.children = "Membership child limit reached.";
+        }
+      }
+    }
+
+    // Birthday Offer is only ever applicable when the booking's headcount
+    // meets the offer's configured Minimum Kids Allowed — mirrors the hard
+    // block createsession enforces server-side, surfaced here too so the
+    // operator finds out before submitting rather than from a rejected
+    // request.
+    if (!membership && offerId !== "none") {
+      const selectedOffer = offers.find((o) => o.id === offerId);
+      if (selectedOffer?.type === "birthday") {
+        const childCount = isGroupBooking
+          ? Number(groupTotalChildren) || 0
+          : children.filter((child) => child.name.trim()).length;
+        const minKids = Number(selectedOffer.rules?.minKids || 0);
+        if (childCount < minKids) {
+          nextErrors.offer = `Birthday Offer "${selectedOffer.name}" requires at least ${minKids} kids — this booking has ${childCount}.`;
         }
       }
     }
@@ -696,7 +717,7 @@ function BillingPage() {
   // dropdown is already disabled once a membership is loaded) is left
   // completely untouched here.
   const specialDayRates = membership ? null : getSpecialDayRates(offerId, offers);
-  const estimatedCharge = isGroupBooking
+  const baseEstimatedCharge = isGroupBooking
     ? calculateEstimatedGroupCharge(
         {
           aboveThreeCount: groupAboveThreeCount,
@@ -707,6 +728,31 @@ function BillingPage() {
         specialDayRates,
       )
     : calculateEstimatedSessionCharge(validChildren, pricingSettings, specialDayRates);
+
+  // Birthday Offer is a flat PER-CHILD amount, never first-hour/extension
+  // pricing and never an above/below-3-years split — mirrors
+  // billing.service.js exactly (amount × number of kids). Socks stay priced
+  // normally on top, and this only kicks in once the booking meets the
+  // offer's Minimum Kids Allowed — otherwise the estimate falls back to
+  // normal per-child pricing, matching what checkout would actually charge
+  // for an ineligible booking.
+  const selectedOffer = !membership && offerId !== "none" ? offers.find((o) => o.id === offerId) : null;
+  // A group booking applying a Birthday Offer only ever needs a total
+  // headcount — the above/below-3-years split (used elsewhere purely for
+  // age-based pricing, which a Birthday Offer never uses — see
+  // billing.service.js) is neither required nor collected. Referenced both
+  // by validateForm above (a closure, resolved at submit time — after this
+  // is assigned) and by the group-booking fields rendered below.
+  const isBirthdayOfferSelected = selectedOffer?.type === "birthday";
+  const birthdayChildCount = isGroupBooking ? Number(groupTotalChildren) || 0 : validChildren.length;
+  const birthdayEligible = selectedOffer?.type === "birthday"
+    && birthdayChildCount >= Number(selectedOffer.rules?.minKids || 0);
+  const estimatedCharge = birthdayEligible
+    ? {
+        ...baseEstimatedCharge,
+        total: Number(selectedOffer.value || 0) * birthdayChildCount + baseEstimatedCharge.socksTotal,
+      }
+    : baseEstimatedCharge;
 
   // Booking-time "Paid" amount must reflect ONLY the initial Above/Below 3
   // Years session charges — never socks, cafe, extensions, or anything from
@@ -774,7 +820,7 @@ function BillingPage() {
                   >
                     <span className="min-w-0">
                       <span className="block text-sm font-medium text-foreground truncate">
-                        {getDisplayName(result)}
+                        {getSearchDisplayName(result)}
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         {result.mobileNumber}
@@ -954,9 +1000,9 @@ function BillingPage() {
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+              <div className={`grid grid-cols-1 gap-5 ${isBirthdayOfferSelected ? "" : "sm:grid-cols-3"}`}>
                 <div className="space-y-2 min-w-0">
-                  <Label>Total Number of Children *</Label>
+                  <Label>{isBirthdayOfferSelected ? "Number of Kids *" : "Total Number of Children *"}</Label>
                   <Input
                     type="number"
                     min="1"
@@ -970,36 +1016,44 @@ function BillingPage() {
                   />
                   {errors.groupTotalChildren && <p className="text-xs text-red-500">{errors.groupTotalChildren}</p>}
                 </div>
-                <div className="space-y-2 min-w-0">
-                  <Label>Children Above 3 Years *</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={groupAboveThreeCount}
-                    onChange={(e) => {
-                      setGroupAboveThreeCount(e.target.value);
-                      setErrors((prev) => ({ ...prev, groupAboveThreeCount: "" }));
-                    }}
-                    className={errors.groupAboveThreeCount ? "border-red-500" : ""}
-                    placeholder="8"
-                  />
-                  {errors.groupAboveThreeCount && <p className="text-xs text-red-500">{errors.groupAboveThreeCount}</p>}
-                </div>
-                <div className="space-y-2 min-w-0">
-                  <Label>Children Below 3 Years *</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={groupBelowThreeCount}
-                    onChange={(e) => {
-                      setGroupBelowThreeCount(e.target.value);
-                      setErrors((prev) => ({ ...prev, groupBelowThreeCount: "" }));
-                    }}
-                    className={errors.groupBelowThreeCount ? "border-red-500" : ""}
-                    placeholder="7"
-                  />
-                  {errors.groupBelowThreeCount && <p className="text-xs text-red-500">{errors.groupBelowThreeCount}</p>}
-                </div>
+                {/* A Birthday Offer only ever needs a total headcount — the
+                    above/below-3-years split below is for normal group
+                    bookings' age-based pricing only, which a Birthday Offer
+                    never uses (see billing.service.js). */}
+                {!isBirthdayOfferSelected && (
+                  <>
+                    <div className="space-y-2 min-w-0">
+                      <Label>Children Above 3 Years *</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={groupAboveThreeCount}
+                        onChange={(e) => {
+                          setGroupAboveThreeCount(e.target.value);
+                          setErrors((prev) => ({ ...prev, groupAboveThreeCount: "" }));
+                        }}
+                        className={errors.groupAboveThreeCount ? "border-red-500" : ""}
+                        placeholder="8"
+                      />
+                      {errors.groupAboveThreeCount && <p className="text-xs text-red-500">{errors.groupAboveThreeCount}</p>}
+                    </div>
+                    <div className="space-y-2 min-w-0">
+                      <Label>Children Below 3 Years *</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={groupBelowThreeCount}
+                        onChange={(e) => {
+                          setGroupBelowThreeCount(e.target.value);
+                          setErrors((prev) => ({ ...prev, groupBelowThreeCount: "" }));
+                        }}
+                        className={errors.groupBelowThreeCount ? "border-red-500" : ""}
+                        placeholder="7"
+                      />
+                      {errors.groupBelowThreeCount && <p className="text-xs text-red-500">{errors.groupBelowThreeCount}</p>}
+                    </div>
+                  </>
+                )}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                 <div className="space-y-2 min-w-0">
@@ -1202,10 +1256,20 @@ function BillingPage() {
                       {offer.name} ·{" "}
                       {offer.type === "discount"
                         ? `${offer.value}%`
-                        : `₹${offer.value}`}
+                        : offer.type === "birthday"
+                          ? `₹${offer.value}/child`
+                          : `₹${offer.value}`}
                     </option>
                   ))}
               </select>
+              {selectedOffer?.type === "birthday" && (
+                <p className={`text-xs ${errors.offer ? "text-red-500" : "text-muted-foreground"}`}>
+                  {errors.offer || `₹${selectedOffer.value}/child · runs for ${selectedOffer.rules?.hours || 0}h ${selectedOffer.rules?.minutes || 0}m · not extendable · requires at least ${selectedOffer.rules?.minKids || 0} kids`}
+                </p>
+              )}
+              {errors.offer && selectedOffer?.type !== "birthday" && (
+                <p className="text-xs text-red-500">{errors.offer}</p>
+              )}
             </div>
             <div className="space-y-2 min-w-0">
               <Label>Purchase membership{isGroupBooking ? " (unavailable for group bookings)" : " (optional)"}</Label>

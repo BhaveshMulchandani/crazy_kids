@@ -18,6 +18,7 @@ const offerSchema = new mongoose.Schema({
       "flat_discount",
       "membership",
       "special_pricing",
+      "birthday",
     ],
   },
 
