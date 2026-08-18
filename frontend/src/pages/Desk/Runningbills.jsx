@@ -976,6 +976,56 @@ const SettlePendingPaymentControl = ({ pendingAmount, onSettle }) => {
   );
 };
 
+const SessionEditDialog = ({ bill, onClose, onSaved }) => {
+  const [children, setChildren] = useState(() => (bill?.children || []).map((child) => ({ name: child.name || "", dob: child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "", ageCategory: child.ageCategory || "", gender: child.gender || "not_specified", socksOpted: Boolean(child.socksOpted) })));
+  const [groupSocks, setGroupSocks] = useState(bill?.groupBooking?.socksRequired ?? 0);
+  const [saving, setSaving] = useState(false);
+  if (!bill) return null;
+  const updateChild = (index, patch) => setChildren((items) => items.map((child, i) => i === index ? { ...child, ...patch } : child));
+  const save = async (event) => {
+    event.preventDefault();
+    try {
+      setSaving(true);
+      await axios.patch(`${import.meta.env.VITE_API_URL}/session/update/${bill._id}`,
+        bill.groupBooking?.isGroup ? { socksRequired: Number(groupSocks) } : { children },
+        { withCredentials: true });
+      toast.success("Session details updated");
+      await onSaved(); onClose();
+    } catch (error) { toast.error(error.response?.data?.message || "Unable to update session"); }
+    finally { setSaving(false); }
+  };
+  return <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-white">
+      <DialogHeader><DialogTitle>Edit session · {getDisplayName(bill)}</DialogTitle></DialogHeader>
+      <form onSubmit={save} className="space-y-3">
+        {bill.groupBooking?.isGroup ? <label className="grid gap-1 text-sm font-medium">Socks quantity
+          <Input type="number" min="0" max={bill.groupBooking.totalChildren} value={groupSocks} onChange={(e) => setGroupSocks(e.target.value)} />
+        </label> : <>
+          <label className="grid gap-1 text-sm font-medium">Socks quantity
+            <Input type="number" min="0" max={children.length} value={children.filter((child) => child.socksOpted).length} onChange={(e) => {
+              const quantity = Math.max(0, Math.min(children.length, Number(e.target.value) || 0));
+              setChildren((items) => items.map((child, index) => ({ ...child, socksOpted: index < quantity })));
+            }} />
+          </label>
+          {children.map((child, index) => <div key={index} className="rounded-lg border border-border p-3 grid gap-2 sm:grid-cols-2">
+            <Input required placeholder="Child name" value={child.name} onChange={(e) => updateChild(index, { name: e.target.value })} />
+            <Input type="date" value={child.dob} onChange={(e) => updateChild(index, { dob: e.target.value })} />
+            <select required className="h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={child.ageCategory} onChange={(e) => updateChild(index, { ageCategory: e.target.value })}>
+              <option value="">Age category</option><option value="above_3">Above 3 years</option><option value="below_3">Below 3 years</option>
+            </select>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={child.socksOpted} onChange={(e) => updateChild(index, { socksOpted: e.target.checked })} /> Socks</label>
+              <button type="button" disabled={children.length === 1} onClick={() => setChildren((items) => items.filter((_, i) => i !== index))} className="ml-auto text-xs text-destructive disabled:opacity-40">Remove child</button>
+            </div>
+          </div>)}
+          <Button type="button" variant="outline" size="sm" onClick={() => setChildren((items) => [...items, { name: "", dob: "", ageCategory: "", gender: "not_specified", socksOpted: false }])}><Plus className="h-3.5 w-3.5" /> Add child</Button>
+        </>}
+        <DialogFooter><Button type="button" variant="outline" onClick={onClose}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button></DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>;
+};
+
 const BillCard = ({
   bill,
   onPause,
@@ -988,6 +1038,8 @@ const BillCard = ({
   onSettlePayment,
   onCafeTotal,
   onCancel,
+  onEdit,
+  showChildName = false,
   pricingSettings,
   kotsBySession,
   highlighted,
@@ -1047,8 +1099,8 @@ const BillCard = ({
             {bill.sessionNumber}
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <div className="min-w-0 truncate font-bold text-base leading-tight tracking-tight">
-              {getDisplayName(bill)}
+            <div className={`min-w-0 truncate font-bold leading-tight tracking-tight ${showChildName ? "text-xl" : "text-base"}`}>
+              {showChildName ? (children[0]?.name || "") : getDisplayName(bill)}
             </div>
 
             {hasBirthday && (
@@ -1225,6 +1277,7 @@ const BillCard = ({
       </div>
 
       <div className="mt-2.5 flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" className="flex-1" onClick={() => onEdit?.(bill)}><Pencil className="h-3.5 w-3.5 mr-1" /> Edit session</Button>
         {bill.status === "booked" && (
           <Button
             size="sm"
@@ -2138,6 +2191,7 @@ function SessionsPage() {
   const [checkoutBillId, setCheckoutBillId] = useState(null);
   const [finalInvoice, setFinalInvoice] = useState(null);
   const [cafeOrdersBillId, setCafeOrdersBillId] = useState(null);
+  const [editBillId, setEditBillId] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const [bills, setBills] = useState([]);
@@ -2504,6 +2558,7 @@ function SessionsPage() {
                 onSettlePayment={(method) => settlePayment(b, method)}
                 onCafeTotal={(bill) => setCafeOrdersBillId(bill._id)}
                 onCancel={(bill) => setCancelTarget(bill)}
+                onEdit={(bill) => setEditBillId(bill._id)}
                 pricingSettings={pricingSettings}
                 kotsBySession={kotsBySession}
                 highlighted={b._id === highlightId}
@@ -2543,6 +2598,8 @@ function SessionsPage() {
                 onSettlePayment={(method) => settlePayment(b, method)}
                 onCafeTotal={(bill) => setCafeOrdersBillId(bill._id)}
                 onCancel={(bill) => setCancelTarget(bill)}
+                onEdit={(bill) => setEditBillId(bill._id)}
+                showChildName
                 pricingSettings={pricingSettings}
                 kotsBySession={kotsBySession}
                 highlighted={b._id === highlightId}
@@ -2615,6 +2672,7 @@ function SessionsPage() {
           onCompleted={handleCheckoutComplete}
         />
       )}
+      {editBillId && <SessionEditDialog bill={bills.find((bill) => bill._id === editBillId)} onClose={() => setEditBillId(null)} onSaved={loadSessions} />}
       <InvoiceDialog
         invoice={finalInvoice}
         onClose={() => setFinalInvoice(null)}

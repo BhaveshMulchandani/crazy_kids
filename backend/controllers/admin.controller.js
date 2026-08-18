@@ -1,7 +1,9 @@
 const sessionmodel = require("../models/session.model");
 const Invoice = require("../models/invoice.model");
+const Customer = require("../models/customer.model");
 const PDFDocument = require("pdfkit");
 const { aggregateRevenueByMethod } = require("../services/revenue.service");
+const { getNextFormattedNumber } = require("../services/counter.service");
 
 // Lean projection shared by every payment-mode-segregated revenue query
 // below (dashboard lifetime/today, and each report's date range) — kept in
@@ -262,6 +264,32 @@ const dashboardStats = async (req, res) => {
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const addOldCustomer = async (req, res) => {
+  try {
+    const childName = String(req.body?.childName || "").trim();
+    const parentName = String(req.body?.parentName || "").trim();
+    const mobileNumber = String(req.body?.mobileNumber || "").trim();
+    if (!childName || !parentName || !/^\d{10}$/.test(mobileNumber)) {
+      return res.status(400).json({ message: "Child name, parent/guardian name, and a 10-digit mobile number are required" });
+    }
+    const [profile, priorSession] = await Promise.all([
+      Customer.findOne({ mobileNumber }).lean(),
+      sessionmodel.findOne({ mobileNumber }).select("_id sessionNumber").lean(),
+    ]);
+    if (profile || priorSession) {
+      return res.status(409).json({ message: "A customer with this mobile number already exists", customer: profile || priorSession });
+    }
+    const customerNumber = await getNextFormattedNumber({
+      name: "sessionNumber", model: sessionmodel, field: "sessionNumber", prefix: "CK-", padLength: 5,
+    });
+    const customer = await Customer.create({ customerNumber, parentName, mobileNumber, children: [{ name: childName }] });
+    return res.status(201).json({ message: "Old customer added successfully", customer });
+  } catch (error) {
+    if (error.code === 11000) return res.status(409).json({ message: "A customer with this mobile number already exists" });
+    return res.status(500).json({ message: error.message || "Unable to add customer" });
+  }
+};
+
 // Server-side paginated + searchable customer directory. One row per unique
 // mobileNumber (their latest completed session), grouped/paginated entirely
 // via aggregation so the sessions collection is never pulled into app memory
@@ -316,7 +344,25 @@ const fetchcustomers = async (req, res) => {
     const rows = result?.data || [];
     const total = result?.totalCount?.[0]?.count || 0;
 
-    if (!rows.length) {
+    const profileQuery = search ? {
+      $or: [
+        { parentName: { $regex: escapeRegex(search), $options: "i" } },
+        { mobileNumber: { $regex: escapeRegex(search), $options: "i" } },
+        { customerNumber: { $regex: escapeRegex(search), $options: "i" } },
+        { "children.name": { $regex: escapeRegex(search), $options: "i" } },
+      ],
+    } : {};
+    const profiles = await Customer.find(profileQuery).sort({ createdAt: -1 }).lean();
+    const profileMobiles = profiles.map((profile) => profile.mobileNumber);
+    const mobilesWithSessions = profileMobiles.length
+      ? new Set(await sessionmodel.distinct("mobileNumber", { mobileNumber: { $in: profileMobiles } }))
+      : new Set();
+    // Once a manually added customer has a real session, the normal session
+    // row is their directory record. Only pre-visit profiles are appended.
+    const standaloneProfiles = profiles.filter((profile) => !mobilesWithSessions.has(profile.mobileNumber));
+    const standaloneProfilesForPage = page === 1 ? standaloneProfiles : [];
+
+    if (!rows.length && !standaloneProfilesForPage.length) {
       return res.status(200).json({
         success: true,
         count: 0,
@@ -327,7 +373,7 @@ const fetchcustomers = async (req, res) => {
       });
     }
 
-    const mobileNumbers = rows.map((row) => row._id);
+    const mobileNumbers = [...new Set([...rows.map((row) => row._id), ...standaloneProfilesForPage.map((profile) => profile.mobileNumber)])];
 
     const invoiceStats = await Invoice.aggregate([
       { $match: { "customer.mobileNumber": { $in: mobileNumbers } } },
@@ -359,11 +405,21 @@ const fetchcustomers = async (req, res) => {
         reward_points: Number(stats.reward_points || 0),
       };
     });
+    const knownMobiles = new Set(customers.map((customer) => customer.mobileNumber));
+    standaloneProfilesForPage.filter((profile) => !knownMobiles.has(profile.mobileNumber)).forEach((profile) => {
+      const stats = statsMap.get(profile.mobileNumber) || { total_spent: 0, reward_points: 0 };
+      customers.unshift({
+        id: String(profile._id), _id: profile._id, sessionNumber: profile.customerNumber,
+        parentName: profile.parentName, mobileNumber: profile.mobileNumber, bandNumber: profile.bandNumber,
+        children: profile.children, createdAt: profile.createdAt, visit_count: 0,
+        total_spent: Number(stats.total_spent || 0), reward_points: Number(stats.reward_points || 0),
+      });
+    });
 
     return res.status(200).json({
       success: true,
       count: customers.length,
-      total,
+      total: total + standaloneProfiles.length,
       page,
       limit,
       customers,
@@ -1131,6 +1187,7 @@ const yearlyCustomerReportPdf = async (req, res) => {
 };
 
 module.exports = {
+  addOldCustomer,
   fetchcustomers,
   dashboardStats,
   dailyCustomerReport,

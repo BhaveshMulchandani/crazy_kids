@@ -1,4 +1,5 @@
 const sessionmodel = require("../models/session.model");
+const Customer = require("../models/customer.model");
 
 const calculateAge = (dob) => {
   const birthDate = new Date(dob);
@@ -55,6 +56,27 @@ const membershipChildKey = (child) => {
   const name = String(child.name || "").trim().toLowerCase();
   const dobKey = child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "no-dob";
   return `${name}|${dobKey}`;
+};
+
+const customerChildKey = (child) => {
+  const name = String(child?.name || "").trim().toLowerCase();
+  const dob = child?.dob ? new Date(child.dob).toISOString().slice(0, 10) : "";
+  return `${name}|${dob}`;
+};
+
+// Keep an administrator-created customer profile's remembered children in
+// sync with real sessions. It never changes invoice/report totals, which are
+// still calculated from completed sessions and invoices as before.
+const mergeProfileChildren = async (mobileNumber, children) => {
+  const profile = await Customer.findOne({ mobileNumber });
+  if (!profile) return;
+  const seen = new Set(profile.children.map(customerChildKey));
+  (children || []).forEach((child) => {
+    if (!child?.name || seen.has(customerChildKey(child))) return;
+    profile.children.push({ name: child.name, dob: child.dob || null, age: child.age ?? null, ageCategory: child.ageCategory || null, gender: child.gender || "not_specified" });
+    seen.add(customerChildKey(child));
+  });
+  await profile.save();
 };
 
 const createsession = async (
@@ -428,6 +450,8 @@ const createsession = async (
         status: "booked",
       });
 
+    await mergeProfileChildren(session.mobileNumber, session.children);
+
     return res.status(201).json({
       message:
         "Session created successfully",
@@ -439,6 +463,61 @@ const createsession = async (
         error.message ||
         "Internal server error",
     });
+  }
+};
+
+// Edits only an open session and deliberately persists only its child/socks
+// source data. The normal billing service re-reads this session at checkout,
+// so invoice, payment, customer totals and reports continue through the
+// existing single flow rather than through a second calculation path.
+const updateSessionDetails = async (req, res) => {
+  try {
+    const session = await sessionmodel.findById(req.params.id);
+    if (!session) return res.status(404).json({ message: "Session not found" });
+    if (!["booked", "running", "paused"].includes(session.status)) {
+      return res.status(400).json({ message: "Only active sessions can be edited" });
+    }
+    if (session.groupBooking?.isGroup) {
+      const socksRequired = Number(req.body?.socksRequired);
+      if (!Number.isInteger(socksRequired) || socksRequired < 0 || socksRequired > Number(session.groupBooking.totalChildren || 0)) {
+        return res.status(400).json({ message: "Socks quantity must be a whole number within the group size" });
+      }
+      session.groupBooking.socksRequired = socksRequired;
+    } else {
+      const children = req.body?.children;
+      if (!Array.isArray(children) || children.length === 0) return res.status(400).json({ message: "At least one child is required" });
+      const categories = new Set(["above_3", "below_3"]);
+      const genders = new Set(["boy", "girl", "not_specified"]);
+      const wasStarted = ["running", "paused"].includes(session.status);
+      const existingByKey = new Map(session.children.map((child) => [customerChildKey(child), child]));
+      session.children = children.map((child) => {
+        const name = String(child?.name || "").trim();
+        if (!name || !categories.has(child?.ageCategory)) throw new Error("Each child needs a name and age category");
+        const existing = existingByKey.get(customerChildKey(child));
+        return {
+          name, dob: child.dob || null, age: child.dob ? calculateAge(child.dob) : null,
+          ageCategory: child.ageCategory, gender: genders.has(child.gender) ? child.gender : "not_specified",
+          socksOpted: Boolean(child.socksOpted),
+          // Existing child timer is retained; a newly added child joins the
+          // current session clock and has an independent timer from now.
+          timer: existing?.timer || (wasStarted ? { status: session.status === "paused" ? "paused" : "running", scheduledEndTime: session.scheduledEndTime, pauseHistory: [], totalPausedMinutes: 0 } : {}),
+        };
+      });
+    }
+    await session.save();
+    // A pre-session payment remains a payment, but an edited child/socks
+    // total can make it partial (or fully covered). Reuse the same billing
+    // calculation that checkout uses so paid/pending values never drift.
+    const settings = await PriceSetting.findOne();
+    const kots = await KOT.find({ session: session._id });
+    const calculation = await calculateInvoiceCharges({ session, settings, kots });
+    const amountPaid = Number(session.amountPaid || 0);
+    session.paymentStatus = amountPaid <= 0 ? "pending" : amountPaid >= calculation.grandTotal ? "paid" : "partially_paid";
+    await session.save();
+    await mergeProfileChildren(session.mobileNumber, session.children);
+    return res.status(200).json({ message: "Session updated", session });
+  } catch (error) {
+    return res.status(400).json({ message: error.message || "Unable to update session" });
   }
 };
 
@@ -1224,6 +1303,29 @@ const searchBillingCustomer = async (req, res) => {
       return uniqueCustomers;
     }, new Map());
 
+    // Returning customers may have brought only one of several children on
+    // their most recent visit. Merge all completed-session children so the
+    // booking form continues to offer their complete known child list.
+    for (const customer of customers.values()) {
+      const history = await sessionmodel.find({ status: "completed", mobileNumber: customer.mobileNumber }).select("children").lean();
+      const profile = await Customer.findOne({ mobileNumber: customer.mobileNumber }).select("children customerNumber").lean();
+      const seen = new Set();
+      customer.children = [...history.flatMap((entry) => entry.children || []), ...(profile?.children || [])]
+        .filter((child) => child?.name && !seen.has(customerChildKey(child)) && seen.add(customerChildKey(child)));
+      if (profile?.customerNumber) customer.customer_code = profile.customerNumber;
+    }
+    const profileMatches = await Customer.find({
+      $or: [{ parentName: { $regex: escapedQuery, $options: "i" } }, { mobileNumber: { $regex: escapedQuery, $options: "i" } }, { customerNumber: trimmedQuery }, { "children.name": { $regex: escapedQuery, $options: "i" } }],
+    }).lean();
+    profileMatches.forEach((profile) => {
+      if (!customers.has(profile.mobileNumber)) customers.set(profile.mobileNumber, {
+        _id: profile._id, sessionNumber: profile.customerNumber, customer_code: profile.customerNumber,
+        parentName: profile.parentName, mobileNumber: profile.mobileNumber, area: profile.area, city: profile.city,
+        bandNumber: profile.bandNumber, children: profile.children, reference: "", notes: "", createdAt: profile.createdAt,
+        visit_count: 0, total_spent: 0, reward_points: 0,
+      });
+    });
+
     return res.status(200).json({
       count: customers.size,
       customers: [...customers.values()],
@@ -1237,5 +1339,5 @@ const searchBillingCustomer = async (req, res) => {
 
 
 module.exports = {
-  searchBillingCustomer, createsession, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, cancelsession, settlePendingPayment, runningsession, recentCompletedSessions, getSessionKOTs, pauseChild, resumeChild
+  searchBillingCustomer, createsession, updateSessionDetails, bookedsession, startsession, pausesession, resumesession, extendsession, completesession, cancelsession, settlePendingPayment, runningsession, recentCompletedSessions, getSessionKOTs, pauseChild, resumeChild
 };

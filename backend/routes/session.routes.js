@@ -5,6 +5,7 @@ const authmiddleware = require('../middlewares/user.middleware')
 
 router.get("/billing/search",authmiddleware.isLoggedInAsDesk,sessioncontroller.searchBillingCustomer);
 router.post('/create',authmiddleware.isLoggedInAsDesk,sessioncontroller.createsession)
+router.patch('/update/:id',authmiddleware.isLoggedInAsDesk,sessioncontroller.updateSessionDetails)
 router.get('/booked',authmiddleware.isLoggedInAsDesk,sessioncontroller.bookedsession)
 router.get('/running/',authmiddleware.isLoggedInAsDesk,sessioncontroller.runningsession)
 router.get('/completed/recent',authmiddleware.isLoggedInAsDesk,sessioncontroller.recentCompletedSessions)

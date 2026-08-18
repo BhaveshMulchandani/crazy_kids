@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Award, ChevronLeft, ChevronRight, Search, Users as UsersIcon } from "lucide-react";
+import { Award, ChevronLeft, ChevronRight, Search, Users as UsersIcon, Plus } from "lucide-react";
 import axios from "axios";
 import { getDisplayName } from "../../utils/customerDisplay";
 
@@ -31,6 +31,9 @@ function CustomersPage() {
   const [loading, setLoading] = React.useState(true);
   const [page, setPage] = React.useState(1);
   const [total, setTotal] = React.useState(0);
+  const [oldCustomer, setOldCustomer] = React.useState({ childName: "", parentName: "", mobileNumber: "" });
+  const [saving, setSaving] = React.useState(false);
+  const [addOpen, setAddOpen] = React.useState(false);
 
   // Debounce the search box so pagination + search don't fire a request per
   // keystroke — only the settled query reaches the server. A new search
@@ -73,6 +76,21 @@ function CustomersPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const addOldCustomer = async (event) => {
+    event.preventDefault();
+    try {
+      setSaving(true);
+      await axios.post(`${API_BASE}/admin/customers/old`, oldCustomer, { withCredentials: true });
+      setOldCustomer({ childName: "", parentName: "", mobileNumber: "" });
+      setAddOpen(false);
+      setQ(""); setSearch(""); setPage(1);
+      const res = await axios.get(`${API_BASE}/admin/customers`, { params: { page: 1, limit: PAGE_SIZE }, withCredentials: true });
+      setCustomers(res.data.customers || []); setTotal(res.data.total ?? res.data.count ?? 0);
+    } catch (error) {
+      window.alert(error.response?.data?.message || "Unable to add customer");
+    } finally { setSaving(false); }
+  };
+
   return (
     <div className="w-full max-w-[1920px] mx-auto space-y-6 lg:space-y-8 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -83,7 +101,8 @@ function CustomersPage() {
           </p>
         </div>
 
-        <div className="relative w-full max-w-md">
+        <div className="flex w-full max-w-xl gap-2">
+          <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             value={q}
@@ -91,8 +110,26 @@ function CustomersPage() {
             placeholder="Search child, parent, mobile, ID…"
             className="pl-9 h-10"
           />
+          </div>
+          <button type="button" onClick={() => setAddOpen(true)} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm hover:bg-blue-700"><Plus className="h-4 w-4" /> Add Customer</button>
         </div>
       </div>
+
+      {addOpen && <form onSubmit={addOldCustomer} className="surface-card fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 grid gap-3 rounded-xl p-5 shadow-xl">
+        <div className="text-lg font-semibold">Add Customer</div>
+        <label className="grid gap-1 text-xs text-muted-foreground">Child Name
+          <Input required value={oldCustomer.childName} onChange={(e) => setOldCustomer((v) => ({ ...v, childName: e.target.value }))} />
+        </label>
+        <label className="grid gap-1 text-xs text-muted-foreground">Parent / Guardian Name
+          <Input required value={oldCustomer.parentName} onChange={(e) => setOldCustomer((v) => ({ ...v, parentName: e.target.value }))} />
+        </label>
+        <label className="grid gap-1 text-xs text-muted-foreground">Mobile Number
+          <Input required inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={oldCustomer.mobileNumber} onChange={(e) => setOldCustomer((v) => ({ ...v, mobileNumber: e.target.value.replace(/\D/g, "") }))} />
+        </label>
+        <button disabled={saving} className="h-10 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
+          {saving ? "Saving…" : "Save Customer"}
+        </button>
+      </form>}
 
       <div className="surface-card overflow-hidden">
         <div className="overflow-x-auto">
