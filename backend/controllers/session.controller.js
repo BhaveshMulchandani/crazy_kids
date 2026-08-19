@@ -1308,11 +1308,17 @@ const searchBillingCustomer = async (req, res) => {
     // booking form continues to offer their complete known child list.
     for (const customer of customers.values()) {
       const history = await sessionmodel.find({ status: "completed", mobileNumber: customer.mobileNumber }).select("children").lean();
-      const profile = await Customer.findOne({ mobileNumber: customer.mobileNumber }).select("children customerNumber").lean();
+      const profile = await Customer.findOne({ mobileNumber: customer.mobileNumber }).select("children customerNumber area city bandNumber").lean();
       const seen = new Set();
       customer.children = [...history.flatMap((entry) => entry.children || []), ...(profile?.children || [])]
         .filter((child) => child?.name && !seen.has(customerChildKey(child)) && seen.add(customerChildKey(child)));
       if (profile?.customerNumber) customer.customer_code = profile.customerNumber;
+      // An admin-created profile is the durable source for these optional
+      // parent details. Keep using session history as a fallback for legacy
+      // customers that do not have a profile.
+      if (profile?.area) customer.area = profile.area;
+      if (!customer.city && profile?.city) customer.city = profile.city;
+      if (!customer.bandNumber && profile?.bandNumber) customer.bandNumber = profile.bandNumber;
     }
     const profileMatches = await Customer.find({
       $or: [{ parentName: { $regex: escapedQuery, $options: "i" } }, { mobileNumber: { $regex: escapedQuery, $options: "i" } }, { customerNumber: trimmedQuery }, { "children.name": { $regex: escapedQuery, $options: "i" } }],

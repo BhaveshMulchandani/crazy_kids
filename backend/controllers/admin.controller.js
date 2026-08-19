@@ -266,11 +266,26 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const addOldCustomer = async (req, res) => {
   try {
-    const childName = String(req.body?.childName || "").trim();
     const parentName = String(req.body?.parentName || "").trim();
     const mobileNumber = String(req.body?.mobileNumber || "").trim();
-    if (!childName || !parentName || !/^\d{10}$/.test(mobileNumber)) {
-      return res.status(400).json({ message: "Child name, parent/guardian name, and a 10-digit mobile number are required" });
+    const area = String(req.body?.area || "").trim();
+    // Accept the former single-child payload too, so callers already using
+    // this endpoint keep working while the admin form sends a child array.
+    const suppliedChildren = Array.isArray(req.body?.children)
+      ? req.body.children
+      : [{ name: req.body?.childName, dob: req.body?.dob }];
+    const children = suppliedChildren.map((child) => {
+      const name = String(child?.name || "").trim();
+      const dobValue = String(child?.dob || "").trim();
+      const dob = dobValue ? new Date(`${dobValue}T00:00:00.000Z`) : null;
+      return { name, dob };
+    });
+
+    if (!parentName || !/^\d{10}$/.test(mobileNumber) || !children.length || children.some((child) => !child.name)) {
+      return res.status(400).json({ message: "Each child needs a name, along with parent/guardian name and a 10-digit mobile number" });
+    }
+    if (children.some((child) => child.dob && Number.isNaN(child.dob.getTime()))) {
+      return res.status(400).json({ message: "Enter a valid date of birth for each child" });
     }
     const [profile, priorSession] = await Promise.all([
       Customer.findOne({ mobileNumber }).lean(),
@@ -282,7 +297,7 @@ const addOldCustomer = async (req, res) => {
     const customerNumber = await getNextFormattedNumber({
       name: "sessionNumber", model: sessionmodel, field: "sessionNumber", prefix: "CK-", padLength: 5,
     });
-    const customer = await Customer.create({ customerNumber, parentName, mobileNumber, children: [{ name: childName }] });
+    const customer = await Customer.create({ customerNumber, parentName, mobileNumber, area, children });
     return res.status(201).json({ message: "Old customer added successfully", customer });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ message: "A customer with this mobile number already exists" });

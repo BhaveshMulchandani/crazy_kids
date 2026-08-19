@@ -31,7 +31,8 @@ function CustomersPage() {
   const [loading, setLoading] = React.useState(true);
   const [page, setPage] = React.useState(1);
   const [total, setTotal] = React.useState(0);
-  const [oldCustomer, setOldCustomer] = React.useState({ childName: "", parentName: "", mobileNumber: "" });
+  const emptyCustomer = () => ({ parentName: "", mobileNumber: "", area: "", children: [{ name: "", dob: "" }] });
+  const [oldCustomer, setOldCustomer] = React.useState(emptyCustomer);
   const [saving, setSaving] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
 
@@ -81,7 +82,7 @@ function CustomersPage() {
     try {
       setSaving(true);
       await axios.post(`${API_BASE}/admin/customers/old`, oldCustomer, { withCredentials: true });
-      setOldCustomer({ childName: "", parentName: "", mobileNumber: "" });
+      setOldCustomer(emptyCustomer());
       setAddOpen(false);
       setQ(""); setSearch(""); setPage(1);
       const res = await axios.get(`${API_BASE}/admin/customers`, { params: { page: 1, limit: PAGE_SIZE }, withCredentials: true });
@@ -115,17 +116,36 @@ function CustomersPage() {
         </div>
       </div>
 
-      {addOpen && <form onSubmit={addOldCustomer} className="surface-card fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 grid gap-3 rounded-xl p-5 shadow-xl">
+      {addOpen && <form onSubmit={addOldCustomer} className="surface-card fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md max-h-[calc(100vh-2rem)] -translate-x-1/2 -translate-y-1/2 grid gap-3 overflow-y-auto rounded-xl p-5 shadow-xl">
         <div className="text-lg font-semibold">Add Customer</div>
-        <label className="grid gap-1 text-xs text-muted-foreground">Child Name
-          <Input required value={oldCustomer.childName} onChange={(e) => setOldCustomer((v) => ({ ...v, childName: e.target.value }))} />
-        </label>
         <label className="grid gap-1 text-xs text-muted-foreground">Parent / Guardian Name
           <Input required value={oldCustomer.parentName} onChange={(e) => setOldCustomer((v) => ({ ...v, parentName: e.target.value }))} />
         </label>
         <label className="grid gap-1 text-xs text-muted-foreground">Mobile Number
           <Input required inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={oldCustomer.mobileNumber} onChange={(e) => setOldCustomer((v) => ({ ...v, mobileNumber: e.target.value.replace(/\D/g, "") }))} />
         </label>
+        <label className="grid gap-1 text-xs text-muted-foreground">Area
+          <Input value={oldCustomer.area} onChange={(e) => setOldCustomer((v) => ({ ...v, area: e.target.value }))} />
+        </label>
+        <div className="grid gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">Children</span>
+            <button type="button" onClick={() => setOldCustomer((v) => ({ ...v, children: [...v.children, { name: "", dob: "" }] }))} className="text-xs font-medium text-primary hover:underline">+ Add child</button>
+          </div>
+          {oldCustomer.children.map((child, index) => (
+            <div key={index} className="grid grid-cols-[1fr_auto] gap-2 rounded-lg border border-border p-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="grid gap-1 text-xs text-muted-foreground">Child Name
+                  <Input required value={child.name} onChange={(e) => setOldCustomer((v) => ({ ...v, children: v.children.map((item, itemIndex) => itemIndex === index ? { ...item, name: e.target.value } : item) }))} />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">DOB
+                  <Input type="date" value={child.dob} onChange={(e) => setOldCustomer((v) => ({ ...v, children: v.children.map((item, itemIndex) => itemIndex === index ? { ...item, dob: e.target.value } : item) }))} />
+                </label>
+              </div>
+              {oldCustomer.children.length > 1 && <button type="button" aria-label={`Remove child ${index + 1}`} onClick={() => setOldCustomer((v) => ({ ...v, children: v.children.filter((_, itemIndex) => itemIndex !== index) }))} className="self-end pb-2 text-xs font-medium text-destructive hover:underline">Remove</button>}
+            </div>
+          ))}
+        </div>
         <button disabled={saving} className="h-10 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
           {saving ? "Saving…" : "Save Customer"}
         </button>
