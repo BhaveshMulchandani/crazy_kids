@@ -100,17 +100,16 @@ const logout = async (req, res) => {
 
 const admin = async (req, res) => {
     try {
-        const existingadmin = await usermodel.findOne({ email: "admin@me.com" })
+        const existingadmin = await usermodel.findOne({ email: "desaiswatib@gmail.com" })
 
         if (existingadmin) return res.status(409).json({ message: "admin already exists." })
-
-        const hashpassword = await bcrypt.hash("admin@1234", 12)
+        const hashpassword = await bcrypt.hash("240126", 12)
 
 
         const admin = await usermodel.create({
 
             username: "Admin",
-            email: "admin@me.com",
+            email: "desaiswatib@gmail.com",
             password: hashpassword,
             role: "admin"
         })
