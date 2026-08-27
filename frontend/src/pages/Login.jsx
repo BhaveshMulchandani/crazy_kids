@@ -206,7 +206,7 @@ export default function Login() {
           </form>
 
           {/* Toggle */}
-          <div className="mt-6 text-center text-sm text-slate-500">
+          {/* <div className="mt-6 text-center text-sm text-slate-500">
             <>
               No account yet?{" "}
               <Link
@@ -216,7 +216,7 @@ export default function Login() {
                 Create one
               </Link>
             </>
-          </div>
+          </div> */}
         </div>
       </div>
     </div>
