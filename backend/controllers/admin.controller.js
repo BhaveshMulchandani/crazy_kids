@@ -1,9 +1,12 @@
 const sessionmodel = require("../models/session.model");
 const Invoice = require("../models/invoice.model");
 const Customer = require("../models/customer.model");
+const Membership = require("../models/membership.model");
+const LoyaltyTransaction = require("../models/loyaltyTransaction.model");
 const PDFDocument = require("pdfkit");
 const { aggregateRevenueByMethod } = require("../services/revenue.service");
 const { getNextFormattedNumber } = require("../services/counter.service");
+const { getLoyaltyBalances } = require("../services/loyalty.service");
 
 // Lean projection shared by every payment-mode-segregated revenue query
 // below (dashboard lifetime/today, and each report's date range) — kept in
@@ -223,6 +226,17 @@ const dashboardStats = async (req, res) => {
       customerCount: row.customerCount || 0,
     }));
 
+    // Overlay each top customer's CURRENT redeemable balance (earned minus
+    // any desk-side redemption/adjustment) via the shared loyalty service,
+    // in place of the raw "$sum of charges.loyaltyPoints" the facet above
+    // computed — same formula Customers/billing search use, so this card
+    // never drifts from what Desk shows after a redemption.
+    const topCustomerBalances = await getLoyaltyBalances(facets.topCustomers.map((c) => c._id));
+    const topCustomersWithBalance = facets.topCustomers.map((c) => ({
+      ...c,
+      reward_points: topCustomerBalances.get(c._id) ?? c.reward_points,
+    }));
+
     const offerTotals = facets.offerTotals[0] || { usageCount: 0, totalDiscount: 0 };
     const mostUsedOffer = facets.offerUsage[0] || null;
     const offerAnalytics = {
@@ -247,7 +261,7 @@ const dashboardStats = async (req, res) => {
       month,
       repeatCustomers,
       newCustomersThisWeek,
-      topCustomers: facets.topCustomers,
+      topCustomers: topCustomersWithBalance,
       recentTransactions: facets.recentTransactions,
       revenueTrend,
       offerUsage: facets.offerUsage,
@@ -264,28 +278,42 @@ const dashboardStats = async (req, res) => {
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// Shared by addOldCustomer and updateCustomer so both endpoints enforce
+// exactly the same rules on the same fields (parent/guardian name, area,
+// children). mobileNumber validation is included but callers that don't
+// accept a mobile number edit (updateCustomer) simply ignore that half of
+// the result.
+const parseCustomerPayload = (body) => {
+  const parentName = String(body?.parentName || "").trim();
+  const mobileNumber = String(body?.mobileNumber || "").trim();
+  const area = String(body?.area || "").trim();
+  // Accept the former single-child payload too, so callers already using
+  // this endpoint keep working while the admin form sends a child array.
+  const suppliedChildren = Array.isArray(body?.children)
+    ? body.children
+    : [{ name: body?.childName, dob: body?.dob }];
+  const children = suppliedChildren.map((child) => {
+    const name = String(child?.name || "").trim();
+    const dobValue = String(child?.dob || "").trim();
+    const dob = dobValue ? new Date(`${dobValue}T00:00:00.000Z`) : null;
+    return { name, dob };
+  });
+
+  let error = null;
+  if (!parentName || !children.length || children.some((child) => !child.name)) {
+    error = "Each child needs a name, along with parent/guardian name";
+  } else if (children.some((child) => child.dob && Number.isNaN(child.dob.getTime()))) {
+    error = "Enter a valid date of birth for each child";
+  }
+
+  return { parentName, mobileNumber, area, children, error };
+};
+
 const addOldCustomer = async (req, res) => {
   try {
-    const parentName = String(req.body?.parentName || "").trim();
-    const mobileNumber = String(req.body?.mobileNumber || "").trim();
-    const area = String(req.body?.area || "").trim();
-    // Accept the former single-child payload too, so callers already using
-    // this endpoint keep working while the admin form sends a child array.
-    const suppliedChildren = Array.isArray(req.body?.children)
-      ? req.body.children
-      : [{ name: req.body?.childName, dob: req.body?.dob }];
-    const children = suppliedChildren.map((child) => {
-      const name = String(child?.name || "").trim();
-      const dobValue = String(child?.dob || "").trim();
-      const dob = dobValue ? new Date(`${dobValue}T00:00:00.000Z`) : null;
-      return { name, dob };
-    });
-
-    if (!parentName || !/^\d{10}$/.test(mobileNumber) || !children.length || children.some((child) => !child.name)) {
-      return res.status(400).json({ message: "Each child needs a name, along with parent/guardian name and a 10-digit mobile number" });
-    }
-    if (children.some((child) => child.dob && Number.isNaN(child.dob.getTime()))) {
-      return res.status(400).json({ message: "Enter a valid date of birth for each child" });
+    const { parentName, mobileNumber, area, children, error } = parseCustomerPayload(req.body);
+    if (error || !/^\d{10}$/.test(mobileNumber)) {
+      return res.status(400).json({ message: error || "A valid 10-digit mobile number is required" });
     }
     const [profile, priorSession] = await Promise.all([
       Customer.findOne({ mobileNumber }).lean(),
@@ -302,6 +330,88 @@ const addOldCustomer = async (req, res) => {
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ message: "A customer with this mobile number already exists" });
     return res.status(500).json({ message: error.message || "Unable to add customer" });
+  }
+};
+
+// Edits a customer's profile details (parent/guardian name, mobile number,
+// area, children). Writes go to the Customer collection — the same
+// "durable profile" already read back by searchBillingCustomer to overlay
+// onto session-derived rows — so updating it here (rather than rewriting
+// historical session/invoice charge/points data) is what makes the edit
+// show up everywhere going forward while leaving past bills' amounts
+// untouched.
+//
+// mobileNumber is this app's customer identity key (see CLAUDE.md — there
+// is no separate customer id sessions/invoices join on). If it changes,
+// leaving history attached to the old number would silently split one
+// customer into two ("old" sessions under the old number, an orphaned new
+// profile under the new one) — the opposite of "reflected everywhere" / "no
+// duplicate customer". So a mobile-number edit is treated as correcting the
+// identity key itself: it's propagated (identity fields only — never
+// charges/points/payment/dates) onto every existing Session, Invoice,
+// Membership and LoyaltyTransaction already on file for the old number.
+const updateCustomer = async (req, res) => {
+  try {
+    const currentMobileNumber = String(req.params.mobileNumber || "").trim();
+    if (!/^\d{10}$/.test(currentMobileNumber)) {
+      return res.status(400).json({ message: "A valid 10-digit mobile number is required" });
+    }
+    const { parentName, area, children, error } = parseCustomerPayload(req.body);
+    if (error) return res.status(400).json({ message: error });
+
+    const suppliedMobileNumber = String(req.body?.mobileNumber || "").trim();
+    const nextMobileNumber = suppliedMobileNumber || currentMobileNumber;
+    if (!/^\d{10}$/.test(nextMobileNumber)) {
+      return res.status(400).json({ message: "A valid 10-digit mobile number is required" });
+    }
+    const mobileNumberChanged = nextMobileNumber !== currentMobileNumber;
+
+    const [existingProfile, priorSession] = await Promise.all([
+      Customer.findOne({ mobileNumber: currentMobileNumber }),
+      sessionmodel.exists({ mobileNumber: currentMobileNumber }),
+    ]);
+    if (!existingProfile && !priorSession) {
+      return res.status(404).json({ message: "No customer found with this mobile number" });
+    }
+
+    if (mobileNumberChanged) {
+      const [conflictProfile, conflictSession] = await Promise.all([
+        Customer.findOne({ mobileNumber: nextMobileNumber }).select("_id").lean(),
+        sessionmodel.exists({ mobileNumber: nextMobileNumber }),
+      ]);
+      if (conflictProfile || conflictSession) {
+        return res.status(409).json({ message: "A customer with this mobile number already exists" });
+      }
+    }
+
+    let customer;
+    if (existingProfile) {
+      existingProfile.set({ parentName, area, children, mobileNumber: nextMobileNumber });
+      customer = await existingProfile.save();
+    } else {
+      // First edit for a customer who only exists via session history —
+      // create their durable profile now, same as addOldCustomer, so this
+      // edit (and any future one) persists and is picked up by the
+      // customer list / billing search overlays below.
+      const customerNumber = await getNextFormattedNumber({
+        name: "sessionNumber", model: sessionmodel, field: "sessionNumber", prefix: "CK-", padLength: 5,
+      });
+      customer = await Customer.create({ customerNumber, parentName, mobileNumber: nextMobileNumber, area, children });
+    }
+
+    if (mobileNumberChanged) {
+      await Promise.all([
+        sessionmodel.updateMany({ mobileNumber: currentMobileNumber }, { $set: { mobileNumber: nextMobileNumber } }),
+        Invoice.updateMany({ "customer.mobileNumber": currentMobileNumber }, { $set: { "customer.mobileNumber": nextMobileNumber } }),
+        Membership.updateMany({ "customer.mobileNumber": currentMobileNumber }, { $set: { "customer.mobileNumber": nextMobileNumber } }),
+        LoyaltyTransaction.updateMany({ mobileNumber: currentMobileNumber }, { $set: { mobileNumber: nextMobileNumber } }),
+      ]);
+    }
+
+    return res.status(200).json({ message: "Customer updated successfully", customer });
+  } catch (error) {
+    if (error.code === 11000) return res.status(409).json({ message: "A customer with this mobile number already exists" });
+    return res.status(500).json({ message: error.message || "Unable to update customer" });
   }
 };
 
@@ -390,44 +500,59 @@ const fetchcustomers = async (req, res) => {
 
     const mobileNumbers = [...new Set([...rows.map((row) => row._id), ...standaloneProfilesForPage.map((profile) => profile.mobileNumber)])];
 
-    const invoiceStats = await Invoice.aggregate([
-      { $match: { "customer.mobileNumber": { $in: mobileNumbers } } },
-      {
-        $group: {
-          _id: "$customer.mobileNumber",
-          total_spent: { $sum: "$charges.grandTotal" },
-          reward_points: { $sum: "$charges.loyaltyPoints" },
+    const [invoiceStats, rowProfiles, loyaltyBalances] = await Promise.all([
+      Invoice.aggregate([
+        { $match: { "customer.mobileNumber": { $in: mobileNumbers } } },
+        {
+          $group: {
+            _id: "$customer.mobileNumber",
+            total_spent: { $sum: "$charges.grandTotal" },
+          },
         },
-      },
+      ]),
+      // A Customer profile is the durable source for these fields once an
+      // admin has edited them (see updateCustomer) — overlay it onto the
+      // session-derived row here (same rule searchBillingCustomer applies)
+      // so an edit shows up in the directory immediately, without touching
+      // the underlying session documents. Fetched by exact mobile number so
+      // this always finds a match regardless of the `search` filter above.
+      rows.length ? Customer.find({ mobileNumber: { $in: rows.map((row) => row._id) } }).lean() : [],
+      // Current redeemable balance (earned - redeemed/adjusted), via the
+      // shared loyalty service so this list, the dashboard, and billing
+      // search never compute it three different ways.
+      getLoyaltyBalances(mobileNumbers),
     ]);
     const statsMap = new Map(invoiceStats.map((row) => [row._id, row]));
+    const rowProfileMap = new Map(rowProfiles.map((profile) => [profile.mobileNumber, profile]));
 
     const customers = rows.map((row) => {
       const session = row.latestSession;
-      const stats = statsMap.get(row._id) || { total_spent: 0, reward_points: 0 };
+      const stats = statsMap.get(row._id) || { total_spent: 0 };
+      const profile = rowProfileMap.get(row._id);
 
       return {
         id: String(session._id),
         _id: session._id,
         sessionNumber: session.sessionNumber,
-        parentName: session.parentName,
+        parentName: profile?.parentName || session.parentName,
         mobileNumber: session.mobileNumber,
-        bandNumber: session.bandNumber,
-        children: session.children,
+        bandNumber: profile?.bandNumber || session.bandNumber,
+        area: profile?.area || session.area,
+        children: profile?.children?.length ? profile.children : session.children,
         createdAt: session.createdAt,
         visit_count: row.visit_count,
         total_spent: Number(stats.total_spent || 0),
-        reward_points: Number(stats.reward_points || 0),
+        reward_points: Number(loyaltyBalances.get(row._id) || 0),
       };
     });
     const knownMobiles = new Set(customers.map((customer) => customer.mobileNumber));
     standaloneProfilesForPage.filter((profile) => !knownMobiles.has(profile.mobileNumber)).forEach((profile) => {
-      const stats = statsMap.get(profile.mobileNumber) || { total_spent: 0, reward_points: 0 };
+      const stats = statsMap.get(profile.mobileNumber) || { total_spent: 0 };
       customers.unshift({
         id: String(profile._id), _id: profile._id, sessionNumber: profile.customerNumber,
         parentName: profile.parentName, mobileNumber: profile.mobileNumber, bandNumber: profile.bandNumber,
         children: profile.children, createdAt: profile.createdAt, visit_count: 0,
-        total_spent: Number(stats.total_spent || 0), reward_points: Number(stats.reward_points || 0),
+        total_spent: Number(stats.total_spent || 0), reward_points: Number(loyaltyBalances.get(profile.mobileNumber) || 0),
       });
     });
 
@@ -1203,6 +1328,7 @@ const yearlyCustomerReportPdf = async (req, res) => {
 
 module.exports = {
   addOldCustomer,
+  updateCustomer,
   fetchcustomers,
   dashboardStats,
   dailyCustomerReport,

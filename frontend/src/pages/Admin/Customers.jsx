@@ -1,6 +1,7 @@
 import * as React from "react";
-import { Award, ChevronLeft, ChevronRight, Search, Users as UsersIcon, Plus } from "lucide-react";
+import { Award, ChevronLeft, ChevronRight, Search, Users as UsersIcon, Plus, Pencil } from "lucide-react";
 import axios from "axios";
+import { toast } from "sonner";
 import { getDisplayName } from "../../utils/customerDisplay";
 
 const cn = (...classes) => classes.filter(Boolean).join(" ");
@@ -35,6 +36,8 @@ function CustomersPage() {
   const [oldCustomer, setOldCustomer] = React.useState(emptyCustomer);
   const [saving, setSaving] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
+  const [editCustomer, setEditCustomer] = React.useState(null);
+  const [editSaving, setEditSaving] = React.useState(false);
 
   // Debounce the search box so pagination + search don't fire a request per
   // keystroke — only the settled query reaches the server. A new search
@@ -77,6 +80,11 @@ function CustomersPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const refreshCustomers = async (targetPage = page) => {
+    const res = await axios.get(`${API_BASE}/admin/customers`, { params: { page: targetPage, limit: PAGE_SIZE, search: search || undefined }, withCredentials: true });
+    setCustomers(res.data.customers || []); setTotal(res.data.total ?? res.data.count ?? 0);
+  };
+
   const addOldCustomer = async (event) => {
     event.preventDefault();
     try {
@@ -85,11 +93,39 @@ function CustomersPage() {
       setOldCustomer(emptyCustomer());
       setAddOpen(false);
       setQ(""); setSearch(""); setPage(1);
-      const res = await axios.get(`${API_BASE}/admin/customers`, { params: { page: 1, limit: PAGE_SIZE }, withCredentials: true });
-      setCustomers(res.data.customers || []); setTotal(res.data.total ?? res.data.count ?? 0);
+      await refreshCustomers(1);
     } catch (error) {
       window.alert(error.response?.data?.message || "Unable to add customer");
     } finally { setSaving(false); }
+  };
+
+  const toDateInputValue = (value) => (value ? String(value).slice(0, 10) : "");
+
+  const openEdit = (customer) => {
+    setEditCustomer({
+      originalMobileNumber: customer.mobileNumber,
+      mobileNumber: customer.mobileNumber,
+      parentName: customer.parentName || "",
+      area: customer.area || "",
+      children: customer.children?.length
+        ? customer.children.map((child) => ({ name: child.name || "", dob: toDateInputValue(child.dob) }))
+        : [{ name: "", dob: "" }],
+    });
+  };
+
+  const submitEdit = async (event) => {
+    event.preventDefault();
+    if (!editCustomer) return;
+    try {
+      setEditSaving(true);
+      const { originalMobileNumber, mobileNumber, parentName, area, children } = editCustomer;
+      await axios.put(`${API_BASE}/admin/customers/${originalMobileNumber}`, { mobileNumber, parentName, area, children }, { withCredentials: true });
+      toast.success("Customer updated successfully.");
+      setEditCustomer(null);
+      await refreshCustomers();
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Unable to update customer");
+    } finally { setEditSaving(false); }
   };
 
   return (
@@ -151,6 +187,56 @@ function CustomersPage() {
         </button>
       </form>}
 
+      {editCustomer && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setEditCustomer(null)} />
+          <form onSubmit={submitEdit} className="surface-card fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md max-h-[calc(100vh-2rem)] -translate-x-1/2 -translate-y-1/2 grid gap-3 overflow-y-auto rounded-xl p-5 shadow-xl">
+            <div className="text-lg font-semibold">Edit Customer</div>
+            <label className="grid gap-1 text-xs text-muted-foreground">Parent / Guardian Name
+              <Input required value={editCustomer.parentName} onChange={(e) => setEditCustomer((v) => ({ ...v, parentName: e.target.value }))} />
+            </label>
+            <label className="grid gap-1 text-xs text-muted-foreground">Mobile Number
+              <Input required inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={editCustomer.mobileNumber} onChange={(e) => setEditCustomer((v) => ({ ...v, mobileNumber: e.target.value.replace(/\D/g, "") }))} />
+            </label>
+            {editCustomer.mobileNumber !== editCustomer.originalMobileNumber && (
+              <p className="text-xs text-amber-600">
+                Changing the mobile number moves this customer's full history (sessions, invoices, memberships) to the new number.
+              </p>
+            )}
+            <label className="grid gap-1 text-xs text-muted-foreground">Area
+              <Input value={editCustomer.area} onChange={(e) => setEditCustomer((v) => ({ ...v, area: e.target.value }))} />
+            </label>
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">Children</span>
+                <button type="button" onClick={() => setEditCustomer((v) => ({ ...v, children: [...v.children, { name: "", dob: "" }] }))} className="text-xs font-medium text-primary hover:underline">+ Add child</button>
+              </div>
+              {editCustomer.children.map((child, index) => (
+                <div key={index} className="grid grid-cols-[1fr_auto] gap-2 rounded-lg border border-border p-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="grid gap-1 text-xs text-muted-foreground">Child Name
+                      <Input required value={child.name} onChange={(e) => setEditCustomer((v) => ({ ...v, children: v.children.map((item, itemIndex) => itemIndex === index ? { ...item, name: e.target.value } : item) }))} />
+                    </label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">DOB
+                      <Input type="date" value={child.dob} onChange={(e) => setEditCustomer((v) => ({ ...v, children: v.children.map((item, itemIndex) => itemIndex === index ? { ...item, dob: e.target.value } : item) }))} />
+                    </label>
+                  </div>
+                  {editCustomer.children.length > 1 && <button type="button" aria-label={`Remove child ${index + 1}`} onClick={() => setEditCustomer((v) => ({ ...v, children: v.children.filter((_, itemIndex) => itemIndex !== index) }))} className="self-end pb-2 text-xs font-medium text-destructive hover:underline">Remove</button>}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setEditCustomer(null)} className="h-10 flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-input px-4 text-sm font-medium shadow-sm hover:bg-accent">
+                Cancel
+              </button>
+              <button disabled={editSaving} className="h-10 flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
+                {editSaving ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+
       <div className="surface-card overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -164,13 +250,14 @@ function CustomersPage() {
               <Th className="text-right">Points</Th>
               <Th className="text-right">Total Spent</Th>
               <Th>Joined</Th>
+              <Th className="text-right">Actions</Th>
             </tr>
           </thead>
           <tbody>
             {customers.length === 0 ? (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-12 text-muted-foreground"
                 >
                   <UsersIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -208,6 +295,15 @@ function CustomersPage() {
                   </td>
                   <td className="px-5 py-3.5 text-muted-foreground">
                     {new Date(customer.createdAt).toLocaleDateString()}
+                  </td>
+                  <td className="px-5 py-3.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(customer)}
+                      className="inline-flex items-center gap-1 rounded-md border border-input px-2.5 py-1.5 text-xs font-medium shadow-sm hover:bg-accent"
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> Edit
+                    </button>
                   </td>
                 </tr>
               ))

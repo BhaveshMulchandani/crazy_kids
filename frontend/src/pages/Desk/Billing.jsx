@@ -11,7 +11,8 @@ import {
   Baby,
   UsersRound,
 } from "lucide-react";
-import { getSearchDisplayName } from "../../utils/customerDisplay";
+import { getSearchDisplayName, getDisplayName } from "../../utils/customerDisplay";
+import LoyaltyPointsModal from "../../components/Desk/LoyaltyPointsModal";
 
 // Mock data removed — Billing now uses backend session creation
 
@@ -235,6 +236,7 @@ const Switch = ({ checked = false, onCheckedChange, disabled, ...props }) => {
 function BillingPage() {
   const [lookup, setLookup] = useState("");
   const [customer, setCustomer] = useState(null);
+  const [loyaltyModalOpen, setLoyaltyModalOpen] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
   const [parentName, setParentName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -379,6 +381,7 @@ function BillingPage() {
   const applyCustomer = (selectedCustomer) => {
     if (!selectedCustomer) return;
 
+    setLoyaltyModalOpen(false);
     setCustomer(selectedCustomer);
     setParentName(selectedCustomer.parentName || "");
     setMobile(selectedCustomer.mobileNumber || "");
@@ -683,6 +686,7 @@ function BillingPage() {
 
   const reset = () => {
     setCustomer(null);
+    setLoyaltyModalOpen(false);
     setParentName("");
     setMobile("");
     setArea("");
@@ -854,7 +858,21 @@ function BillingPage() {
             <span>{customer.visit_count ?? 0} visits</span>
             <span>₹{Number(customer.total_spent ?? 0).toLocaleString()} spent</span>
             <span>{customer.reward_points ?? 0} pts</span>
+            <button
+              type="button"
+              onClick={() => setLoyaltyModalOpen(true)}
+              className="font-medium text-primary hover:underline"
+            >
+              Manage Points
+            </button>
           </div>
+        )}
+        {loyaltyModalOpen && customer && (
+          <LoyaltyPointsModal
+            customer={{ mobileNumber: customer.mobileNumber, displayName: getDisplayName(customer) }}
+            onClose={() => setLoyaltyModalOpen(false)}
+            onBalanceChange={(newBalance) => setCustomer((c) => (c ? { ...c, reward_points: newBalance } : c))}
+          />
         )}
         {membership && (
           <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-slate-700">

@@ -46,6 +46,7 @@ const { createMembership, refreshStatus } = require('./membership.controller');
 const { calculateInvoiceCharges, dayName, round } = require('../services/billing.service');
 const Notification = require('../models/notification.model');
 const { getNextFormattedNumber } = require('../services/counter.service');
+const { getLoyaltyBalances } = require('../services/loyalty.service');
 const { buildCustomerNameOr, escapeRegex } = require('../utils/customerSearch');
 const { getDisplayName } = require('../utils/customerDisplay');
 
@@ -1276,13 +1277,12 @@ const searchBillingCustomer = async (req, res) => {
       ? await Invoice.find({ session: { $in: completedSessions.map((session) => session._id) } }).select("session charges.grandTotal charges.loyaltyPoints").lean()
       : [];
     const sessionMobileById = new Map(completedSessions.map((session) => [String(session._id), session.mobileNumber]));
-    const totalsByMobile = new Map(mobileNumbers.map((mobileNumber) => [mobileNumber, { visit_count: 0, total_spent: 0, reward_points: 0 }]));
+    const totalsByMobile = new Map(mobileNumbers.map((mobileNumber) => [mobileNumber, { visit_count: 0, total_spent: 0 }]));
     completedSessions.forEach((session) => { totalsByMobile.get(session.mobileNumber).visit_count += 1; });
     invoices.forEach((invoice) => {
       const totals = totalsByMobile.get(sessionMobileById.get(String(invoice.session)));
       if (totals) {
         totals.total_spent += Number(invoice.charges?.grandTotal || 0);
-        totals.reward_points += Number(invoice.charges?.loyaltyPoints || 0);
       }
     });
     // `matches` is sorted newest-first, so the first session seen per
@@ -1308,14 +1308,15 @@ const searchBillingCustomer = async (req, res) => {
     // booking form continues to offer their complete known child list.
     for (const customer of customers.values()) {
       const history = await sessionmodel.find({ status: "completed", mobileNumber: customer.mobileNumber }).select("children").lean();
-      const profile = await Customer.findOne({ mobileNumber: customer.mobileNumber }).select("children customerNumber area city bandNumber").lean();
+      const profile = await Customer.findOne({ mobileNumber: customer.mobileNumber }).select("children customerNumber parentName area city bandNumber").lean();
       const seen = new Set();
       customer.children = [...history.flatMap((entry) => entry.children || []), ...(profile?.children || [])]
         .filter((child) => child?.name && !seen.has(customerChildKey(child)) && seen.add(customerChildKey(child)));
       if (profile?.customerNumber) customer.customer_code = profile.customerNumber;
-      // An admin-created profile is the durable source for these optional
-      // parent details. Keep using session history as a fallback for legacy
-      // customers that do not have a profile.
+      // An admin-created/edited profile is the durable source for these
+      // optional parent details. Keep using session history as a fallback
+      // for legacy customers that do not have a profile.
+      if (profile?.parentName) customer.parentName = profile.parentName;
       if (profile?.area) customer.area = profile.area;
       if (!customer.city && profile?.city) customer.city = profile.city;
       if (!customer.bandNumber && profile?.bandNumber) customer.bandNumber = profile.bandNumber;
@@ -1328,9 +1329,19 @@ const searchBillingCustomer = async (req, res) => {
         _id: profile._id, sessionNumber: profile.customerNumber, customer_code: profile.customerNumber,
         parentName: profile.parentName, mobileNumber: profile.mobileNumber, area: profile.area, city: profile.city,
         bandNumber: profile.bandNumber, children: profile.children, reference: "", notes: "", createdAt: profile.createdAt,
-        visit_count: 0, total_spent: 0, reward_points: 0,
+        visit_count: 0, total_spent: 0,
       });
     });
+
+    // Current redeemable balance (earned minus any desk-side
+    // redemption/adjustment) via the shared loyalty service — same formula
+    // the customer directory and dashboard use, so a redemption made at the
+    // desk is immediately reflected the next time this customer is looked
+    // up for billing.
+    const loyaltyBalances = await getLoyaltyBalances([...customers.keys()]);
+    for (const customer of customers.values()) {
+      customer.reward_points = loyaltyBalances.get(customer.mobileNumber) || 0;
+    }
 
     return res.status(200).json({
       count: customers.size,

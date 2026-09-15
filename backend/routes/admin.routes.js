@@ -5,6 +5,7 @@ const admincontroller = require('../controllers/admin.controller');
 
 router.get('/customers', isLoggedInAsAdmin, admincontroller.fetchcustomers);
 router.post('/customers/old', isLoggedInAsAdmin, admincontroller.addOldCustomer);
+router.put('/customers/:mobileNumber', isLoggedInAsAdmin, admincontroller.updateCustomer);
 router.get('/dashboard', isLoggedInAsAdmin, admincontroller.dashboardStats);
 router.get('/reports/daily', isLoggedInAsAdmin, admincontroller.dailyCustomerReport);
 router.get('/reports/daily/pdf', isLoggedInAsAdmin, admincontroller.dailyCustomerReportPdf);
