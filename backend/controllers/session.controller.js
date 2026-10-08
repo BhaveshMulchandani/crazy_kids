@@ -95,6 +95,7 @@ const createsession = async (
       offer,
       reference,
       socksRequired,
+      socksQuantity,
       notes,
       paymentStatus,
       paymentMethod,
@@ -205,11 +206,10 @@ const createsession = async (
         });
       }
 
-      if (socksRequired > totalChildren) {
-        return res.status(400).json({
-          message: "Socks required cannot be greater than the total number of children",
-        });
-      }
+      // No upper bound tied to totalChildren — a group booking may need more
+      // pairs of socks than registered kids (e.g. accompanying adults), and
+      // the socks charge is always based on this actual quantity, not a
+      // headcount-derived one (see billing.service.js).
 
       groupBookingData = {
         isGroup: true,
@@ -280,6 +280,22 @@ const createsession = async (
             socksOpted: Boolean(child.socksOpted),
           };
         });
+    }
+
+    // Optional override for a normal booking's socks count — lets an
+    // operator bill more (or fewer) pairs of socks than there are children
+    // on the booking. Undefined/"" leaves it unset (null), which keeps the
+    // existing per-child socksOpted count as the source of truth (see
+    // billing.service.js). Not applicable to a group booking, which already
+    // has its own headcount field, groupBooking.socksRequired.
+    let socksQuantityValue = null;
+    if (!groupBookingData.isGroup && socksQuantity !== undefined && socksQuantity !== "" && socksQuantity !== null) {
+      socksQuantityValue = Number(socksQuantity);
+      if (!Number.isInteger(socksQuantityValue) || socksQuantityValue < 0) {
+        return res.status(400).json({
+          message: "Socks quantity must be a whole number and cannot be negative",
+        });
+      }
     }
 
     // countDocuments()+1 is not concurrency-safe — two bookings arriving
@@ -424,6 +440,8 @@ const createsession = async (
         socksRequired:
           socksRequired ?? false,
 
+        socksQuantity: socksQuantityValue,
+
         notes:
           notes?.trim() || "",
 
@@ -478,14 +496,63 @@ const updateSessionDetails = async (req, res) => {
     if (!["booked", "running", "paused"].includes(session.status)) {
       return res.status(400).json({ message: "Only active sessions can be edited" });
     }
+    const body = req.body || {};
     if (session.groupBooking?.isGroup) {
-      const socksRequired = Number(req.body?.socksRequired);
-      if (!Number.isInteger(socksRequired) || socksRequired < 0 || socksRequired > Number(session.groupBooking.totalChildren || 0)) {
-        return res.status(400).json({ message: "Socks quantity must be a whole number within the group size" });
+      const representativeChildName = body.representativeChildName !== undefined
+        ? String(body.representativeChildName).trim()
+        : session.groupBooking.representativeChildName;
+      const totalChildren = body.totalChildren !== undefined ? Number(body.totalChildren) : Number(session.groupBooking.totalChildren);
+      if (!Number.isInteger(totalChildren) || totalChildren < 1) {
+        return res.status(400).json({ message: "Total children must be provided as a whole number" });
       }
+
+      // A Birthday Offer group booking only ever needs a total headcount,
+      // same rule as at booking time (see createsession) — the
+      // above/below-3-years split doesn't apply and isn't required to sum
+      // to the total.
+      let isBirthdayOffer = false;
+      if (session.offer) {
+        const offerDoc = await Offer.findById(session.offer);
+        isBirthdayOffer = offerDoc?.type === "birthday";
+      }
+
+      let aboveThreeCount = Number(session.groupBooking.aboveThreeCount || 0);
+      let belowThreeCount = Number(session.groupBooking.belowThreeCount || 0);
+      if (!isBirthdayOffer) {
+        aboveThreeCount = body.aboveThreeCount !== undefined ? Number(body.aboveThreeCount) : aboveThreeCount;
+        belowThreeCount = body.belowThreeCount !== undefined ? Number(body.belowThreeCount) : belowThreeCount;
+        if (!Number.isInteger(aboveThreeCount) || aboveThreeCount < 0 || !Number.isInteger(belowThreeCount) || belowThreeCount < 0) {
+          return res.status(400).json({ message: "Children above 3 years and children below 3 years must be provided as whole numbers" });
+        }
+        if (aboveThreeCount + belowThreeCount !== totalChildren) {
+          return res.status(400).json({ message: "Children above 3 years plus children below 3 years must equal the total number of children" });
+        }
+      }
+
+      const socksRequired = body.socksRequired !== undefined ? Number(body.socksRequired) : Number(session.groupBooking.socksRequired || 0);
+      if (!Number.isInteger(socksRequired) || socksRequired < 0) {
+        return res.status(400).json({ message: "Socks required must be a whole number and cannot be negative" });
+      }
+      // No upper bound tied to totalChildren — see createsession.
+
+      if (!representativeChildName && !session.parentName?.trim()) {
+        return res.status(400).json({ message: "Parent/Guardian Name or Representative Child Name is required for a group booking" });
+      }
+
+      session.groupBooking.representativeChildName = representativeChildName;
+      session.groupBooking.totalChildren = totalChildren;
+      session.groupBooking.aboveThreeCount = isBirthdayOffer ? 0 : aboveThreeCount;
+      session.groupBooking.belowThreeCount = isBirthdayOffer ? 0 : belowThreeCount;
       session.groupBooking.socksRequired = socksRequired;
+      if (body.isBirthday !== undefined) session.groupBooking.isBirthday = Boolean(body.isBirthday);
+      // Keeps the display-name placeholder child in sync — same
+      // parentName-else-representativeChildName fallback as createsession
+      // (see customerDisplay.js).
+      if (session.children?.[0]) {
+        session.children[0].name = representativeChildName || session.parentName?.trim() || session.children[0].name;
+      }
     } else {
-      const children = req.body?.children;
+      const children = body.children;
       if (!Array.isArray(children) || children.length === 0) return res.status(400).json({ message: "At least one child is required" });
       const categories = new Set(["above_3", "below_3"]);
       const genders = new Set(["boy", "girl", "not_specified"]);
@@ -504,6 +571,16 @@ const updateSessionDetails = async (req, res) => {
           timer: existing?.timer || (wasStarted ? { status: session.status === "paused" ? "paused" : "running", scheduledEndTime: session.scheduledEndTime, pauseHistory: [], totalPausedMinutes: 0 } : {}),
         };
       });
+
+      // Optional override for this booking's billed socks count — see
+      // session.model.js:socksQuantity. Left untouched when omitted.
+      if (body.socksQuantity !== undefined && body.socksQuantity !== null && body.socksQuantity !== "") {
+        const socksQuantityValue = Number(body.socksQuantity);
+        if (!Number.isInteger(socksQuantityValue) || socksQuantityValue < 0) {
+          return res.status(400).json({ message: "Socks quantity must be a whole number and cannot be negative" });
+        }
+        session.socksQuantity = socksQuantityValue;
+      }
     }
     await session.save();
     // A pre-session payment remains a payment, but an edited child/socks
@@ -820,9 +897,18 @@ const resumeChild = async (req, res) => {
   }
 };
 
+// Accepts an optional `durationMinutes` in the body — 30 or 60 — so the desk
+// can extend by half an hour as well as the original full hour. Omitted
+// (or any other value) falls back to 60 minutes, so existing callers that
+// send no body keep extending by exactly 1 hour, unchanged.
+const EXTENSION_DURATION_MINUTES = [30, 60];
+
 const extendsession = async (req, res) => {
   try {
     const { id } = req.params;
+    const requestedMinutes = Number(req.body?.durationMinutes);
+    const durationMinutes = EXTENSION_DURATION_MINUTES.includes(requestedMinutes) ? requestedMinutes : 60;
+    const extensionHoursToAdd = durationMinutes / 60;
 
     const session = await sessionmodel.findById(id);
 
@@ -865,7 +951,7 @@ const extendsession = async (req, res) => {
       if (membership) {
         refreshStatus(membership);
         const remainingHours = Number(membership.remainingPlayHours || 0);
-        const requestedTotalHours = session.totalHours + 1;
+        const requestedTotalHours = session.totalHours + extensionHoursToAdd;
         if (remainingHours < requestedTotalHours) {
           return res.status(400).json({
             message: `Only ${remainingHours} membership hour${remainingHours === 1 ? "" : "s"} ${remainingHours === 1 ? "is" : "are"} remaining. You cannot extend this session beyond your available membership balance. Please purchase a new membership or continue as a normal customer.`,
@@ -874,30 +960,32 @@ const extendsession = async (req, res) => {
       }
     }
 
-    session.extendedHours += 1;
-    session.totalHours += 1;
+    session.extendedHours += extensionHoursToAdd;
+    session.totalHours += extensionHoursToAdd;
 
     session.extensions.push({
-      hours: 1,
+      hours: extensionHoursToAdd,
       addedAt: new Date(),
     });
 
-    // Extending an already-overdue session must "restart" its timer — 1 hour
-    // from right now — rather than tacking 1 hour onto a scheduledEndTime
-    // that's already in the past, which could still leave it in the past
-    // (e.g. 90 minutes overdue) and keep showing "Session Over" even after a
-    // successful extend. A session that isn't overdue yet keeps the existing
-    // behaviour unchanged: 1 hour added onto its current scheduledEndTime.
+    // Extending an already-overdue session must "restart" its timer — the
+    // extension duration from right now — rather than tacking it onto a
+    // scheduledEndTime that's already in the past, which could still leave
+    // it in the past (e.g. 90 minutes overdue) and keep showing "Session
+    // Over" even after a successful extend. A session that isn't overdue yet
+    // keeps the existing behaviour unchanged: the duration added onto its
+    // current scheduledEndTime.
     const now = new Date();
+    const extensionMs = durationMinutes * 60 * 1000;
     const sessionBaseTime = session.scheduledEndTime && session.scheduledEndTime > now
       ? session.scheduledEndTime
       : now;
-    session.scheduledEndTime = new Date(sessionBaseTime.getTime() + 60 * 60 * 1000);
+    session.scheduledEndTime = new Date(sessionBaseTime.getTime() + extensionMs);
 
     session.children.forEach((child) => {
       if (child.timer.scheduledEndTime) {
         const childBaseTime = child.timer.scheduledEndTime > now ? child.timer.scheduledEndTime : now;
-        child.timer.scheduledEndTime = new Date(childBaseTime.getTime() + 60 * 60 * 1000);
+        child.timer.scheduledEndTime = new Date(childBaseTime.getTime() + extensionMs);
       }
     });
 
@@ -914,7 +1002,7 @@ const extendsession = async (req, res) => {
     );
 
     return res.status(200).json({
-      message: "Session extended by 1 hour",
+      message: durationMinutes === 30 ? "Session extended by 30 minutes" : "Session extended by 1 hour",
       session,
     });
   } catch (error) {

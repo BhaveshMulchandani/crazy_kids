@@ -97,13 +97,18 @@ const elapsedSecondsForChild = (bill, child) => {
 };
 
 // A group booking has no per-child socksOpted flags to count — it collects a
-// single "how many socks does the group need" headcount instead (see
-// billing.service.js).
+// single "how many socks does the group need" headcount instead. A normal
+// booking's count is per-child socksOpted *unless* the operator set an
+// explicit override quantity (bill.socksQuantity) — mirrors
+// billing.service.js exactly so this preview never drifts from what
+// checkout will actually charge.
 const calculateSocksCharge = (bill, pricingSettings) => {
   const children = bill?.children ?? [];
   const socksQty = bill?.groupBooking?.isGroup
     ? Number(bill.groupBooking.socksRequired || 0)
-    : children.filter((child) => child?.socksOpted).length;
+    : bill?.socksQuantity != null
+      ? Number(bill.socksQuantity)
+      : children.filter((child) => child?.socksOpted).length;
   const socksTotal = socksQty * Number(pricingSettings?.socksCost ?? 0);
   return { socksQty, socksTotal };
 };
@@ -978,7 +983,21 @@ const SettlePendingPaymentControl = ({ pendingAmount, onSettle }) => {
 
 const SessionEditDialog = ({ bill, onClose, onSaved }) => {
   const [children, setChildren] = useState(() => (bill?.children || []).map((child) => ({ name: child.name || "", dob: child.dob ? new Date(child.dob).toISOString().slice(0, 10) : "", ageCategory: child.ageCategory || "", gender: child.gender || "not_specified", socksOpted: Boolean(child.socksOpted) })));
+  // Decoupled from the per-child checkboxes above on purpose — an operator
+  // can bill more (or fewer) pairs of socks than there are children on the
+  // booking (see session.model.js:socksQuantity). Defaults to the existing
+  // per-child count so an un-touched booking keeps billing exactly as before.
+  const [socksQuantity, setSocksQuantity] = useState(() => bill?.socksQuantity ?? (bill?.children || []).filter((child) => child.socksOpted).length);
+  // A Birthday Offer group booking only ever collects a total headcount —
+  // mirrors createsession/updateSessionDetails, which never require (or
+  // accept) an above/below-3-years split for one.
+  const isBirthdayOfferGroup = bill?.groupBooking?.isGroup && bill?.offer?.type === "birthday";
+  const [groupName, setGroupName] = useState(bill?.groupBooking?.representativeChildName ?? "");
+  const [groupTotal, setGroupTotal] = useState(bill?.groupBooking?.totalChildren ?? 0);
+  const [groupAbove, setGroupAbove] = useState(bill?.groupBooking?.aboveThreeCount ?? 0);
+  const [groupBelow, setGroupBelow] = useState(bill?.groupBooking?.belowThreeCount ?? 0);
   const [groupSocks, setGroupSocks] = useState(bill?.groupBooking?.socksRequired ?? 0);
+  const [groupIsBirthday, setGroupIsBirthday] = useState(Boolean(bill?.groupBooking?.isBirthday));
   const [saving, setSaving] = useState(false);
   if (!bill) return null;
   const updateChild = (index, patch) => setChildren((items) => items.map((child, i) => i === index ? { ...child, ...patch } : child));
@@ -986,8 +1005,17 @@ const SessionEditDialog = ({ bill, onClose, onSaved }) => {
     event.preventDefault();
     try {
       setSaving(true);
+      const payload = bill.groupBooking?.isGroup
+        ? {
+            representativeChildName: groupName,
+            totalChildren: Number(groupTotal),
+            ...(isBirthdayOfferGroup ? {} : { aboveThreeCount: Number(groupAbove), belowThreeCount: Number(groupBelow) }),
+            socksRequired: Number(groupSocks),
+            isBirthday: groupIsBirthday,
+          }
+        : { children, socksQuantity: Math.max(0, Number(socksQuantity) || 0) };
       await axios.patch(`${import.meta.env.VITE_API_URL}/session/update/${bill._id}`,
-        bill.groupBooking?.isGroup ? { socksRequired: Number(groupSocks) } : { children },
+        payload,
         { withCredentials: true });
       toast.success("Session details updated");
       await onSaved(); onClose();
@@ -998,14 +1026,30 @@ const SessionEditDialog = ({ bill, onClose, onSaved }) => {
     <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-white">
       <DialogHeader><DialogTitle>Edit session · {getDisplayName(bill)}</DialogTitle></DialogHeader>
       <form onSubmit={save} className="space-y-3">
-        {bill.groupBooking?.isGroup ? <label className="grid gap-1 text-sm font-medium">Socks quantity
-          <Input type="number" min="0" max={bill.groupBooking.totalChildren} value={groupSocks} onChange={(e) => setGroupSocks(e.target.value)} />
-        </label> : <>
+        {bill.groupBooking?.isGroup ? <>
+          <label className="grid gap-1 text-sm font-medium">Representative child / group name
+            <Input value={groupName} onChange={(e) => setGroupName(e.target.value)} />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="grid gap-1 text-sm font-medium">Total children
+              <Input type="number" min="1" value={groupTotal} onChange={(e) => setGroupTotal(e.target.value)} />
+            </label>
+            {!isBirthdayOfferGroup && <>
+              <label className="grid gap-1 text-sm font-medium">Above 3 years
+                <Input type="number" min="0" value={groupAbove} onChange={(e) => setGroupAbove(e.target.value)} />
+              </label>
+              <label className="grid gap-1 text-sm font-medium">Below 3 years
+                <Input type="number" min="0" value={groupBelow} onChange={(e) => setGroupBelow(e.target.value)} />
+              </label>
+            </>}
+          </div>
           <label className="grid gap-1 text-sm font-medium">Socks quantity
-            <Input type="number" min="0" max={children.length} value={children.filter((child) => child.socksOpted).length} onChange={(e) => {
-              const quantity = Math.max(0, Math.min(children.length, Number(e.target.value) || 0));
-              setChildren((items) => items.map((child, index) => ({ ...child, socksOpted: index < quantity })));
-            }} />
+            <Input type="number" min="0" value={groupSocks} onChange={(e) => setGroupSocks(e.target.value)} />
+          </label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={groupIsBirthday} onChange={(e) => setGroupIsBirthday(e.target.checked)} /> Birthday Group Booking</label>
+        </> : <>
+          <label className="grid gap-1 text-sm font-medium">Socks quantity
+            <Input type="number" min="0" value={socksQuantity} onChange={(e) => setSocksQuantity(e.target.value)} />
           </label>
           {children.map((child, index) => <div key={index} className="rounded-lg border border-border p-3 grid gap-2 sm:grid-cols-2">
             <Input required placeholder="Child name" value={child.name} onChange={(e) => updateChild(index, { name: e.target.value })} />
@@ -1336,14 +1380,24 @@ const BillCard = ({
                 consistent with how other status-gated actions in this row
                 (Start/Pause/Resume) already only render when applicable. */}
             {bill.offer?.type !== "birthday" && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex-1"
-                onClick={onExtend}
-              >
-                <Clock className="h-3.5 w-3.5 mr-1" /> Extend 1 hr
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => onExtend(30)}
+                >
+                  <Clock className="h-3.5 w-3.5 mr-1" /> +30 min
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => onExtend(60)}
+                >
+                  <Clock className="h-3.5 w-3.5 mr-1" /> Extend 1 hr
+                </Button>
+              </>
             )}
 
             <Button
@@ -1607,11 +1661,19 @@ const invoiceRowStyle = {
   color: INVOICE_TEXT,
 };
 
+// Print-hierarchy weights (darkest/boldest to lightest): Grand Total (900) >
+// main headings (800) > subheadings/table headers (700) > item names &
+// rates/amounts (600) > normal supporting text (400). Segoe UI — the print
+// template's primary font (see buildInvoicePrintHtml) — ships true weight
+// faces on Windows, so these differences render as real stroke-weight
+// changes on the thermal printer rather than being clamped to one "bold".
+const INVOICE_WEIGHT = { grandTotal: 900, heading: 800, subheading: 700, item: 600, normal: 400 };
+
 const InvoiceRow = ({ label, value, bold, muted, color }) => (
   <div
     style={{
       ...invoiceRowStyle,
-      fontWeight: bold ? 700 : 400,
+      fontWeight: bold ? INVOICE_WEIGHT.subheading : muted ? INVOICE_WEIGHT.normal : INVOICE_WEIGHT.item,
       color: color || (muted ? INVOICE_MUTED : INVOICE_TEXT),
       fontSize: muted ? 11 : invoiceRowStyle.fontSize,
     }}
@@ -1625,7 +1687,7 @@ const invoiceThStyle = {
   padding: "5px 7px",
   textAlign: "left",
   fontSize: 10,
-  fontWeight: 700,
+  fontWeight: INVOICE_WEIGHT.subheading,
   letterSpacing: 0.4,
   textTransform: "uppercase",
   color: "#475569",
@@ -1636,6 +1698,7 @@ const invoiceThStyle = {
 const invoiceTdStyle = {
   padding: "5px 7px",
   fontSize: 11.5,
+  fontWeight: INVOICE_WEIGHT.item,
   color: INVOICE_TEXT,
   borderBottom: `1px solid ${INVOICE_BORDER}`,
 };
@@ -1929,13 +1992,13 @@ const InvoiceDialog = ({ invoice, onClose }) => {
             }}
           >
             <div>
-              <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: 0.5, margin: 0, color: INVOICE_ACCENT }}>
+              <h1 style={{ fontSize: 22, fontWeight: INVOICE_WEIGHT.heading, letterSpacing: 0.5, margin: 0, color: INVOICE_ACCENT }}>
                 {COMPANY.name}
               </h1>
-              <div style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: INVOICE_MUTED, marginTop: 2 }}>
+              <div style={{ fontSize: 10, fontWeight: INVOICE_WEIGHT.subheading, letterSpacing: 1, textTransform: "uppercase", color: INVOICE_MUTED, marginTop: 2 }}>
                 Tax Invoice
               </div>
-              <div style={{ fontSize: 10, color: INVOICE_MUTED, marginTop: 5, lineHeight: 1.45 }}>
+              <div style={{ fontSize: 10, fontWeight: INVOICE_WEIGHT.normal, color: INVOICE_MUTED, marginTop: 5, lineHeight: 1.45 }}>
                 {COMPANY.addressLines.map((line) => (
                   <div key={line}>{line}</div>
                 ))}
@@ -1943,8 +2006,8 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "monospace" }}>{invoice.invoice_no}</div>
-              <div style={{ fontSize: 10.5, color: INVOICE_MUTED, marginTop: 2 }}>
+              <div style={{ fontWeight: INVOICE_WEIGHT.subheading, fontSize: 13, fontFamily: "monospace" }}>{invoice.invoice_no}</div>
+              <div style={{ fontSize: 10.5, fontWeight: INVOICE_WEIGHT.normal, color: INVOICE_MUTED, marginTop: 2 }}>
                 {invoice.closed_at ? new Date(invoice.closed_at).toLocaleString() : ""}
               </div>
             </div>
@@ -1961,10 +2024,10 @@ const InvoiceDialog = ({ invoice, onClose }) => {
               fontSize: 11.5,
             }}
           >
-            <div><span style={{ color: INVOICE_MUTED }}>{invoiceIdentity.label}</span><br />{invoiceIdentity.value} · {customer.mobileNumber || invoice.mobileNumber}</div>
-            <div><span style={{ color: INVOICE_MUTED }}>Band</span><br />{customer.bandNumber || invoice.bandNumber || "—"}</div>
-            <div><span style={{ color: INVOICE_MUTED }}>Session</span><br />{customer.sessionNumber || invoice.sessionNumber || "—"}</div>
-            {customer.city && <div><span style={{ color: INVOICE_MUTED }}>City</span><br />{customer.city}</div>}
+            <div><span style={{ color: INVOICE_MUTED, fontWeight: INVOICE_WEIGHT.subheading }}>{invoiceIdentity.label}</span><br /><span style={{ fontWeight: INVOICE_WEIGHT.item }}>{invoiceIdentity.value} · {customer.mobileNumber || invoice.mobileNumber}</span></div>
+            <div><span style={{ color: INVOICE_MUTED, fontWeight: INVOICE_WEIGHT.subheading }}>Band</span><br /><span style={{ fontWeight: INVOICE_WEIGHT.item }}>{customer.bandNumber || invoice.bandNumber || "—"}</span></div>
+            <div><span style={{ color: INVOICE_MUTED, fontWeight: INVOICE_WEIGHT.subheading }}>Session</span><br /><span style={{ fontWeight: INVOICE_WEIGHT.item }}>{customer.sessionNumber || invoice.sessionNumber || "—"}</span></div>
+            {customer.city && <div><span style={{ color: INVOICE_MUTED, fontWeight: INVOICE_WEIGHT.subheading }}>City</span><br /><span style={{ fontWeight: INVOICE_WEIGHT.item }}>{customer.city}</span></div>}
           </div>
 
           <div>
@@ -1998,11 +2061,11 @@ const InvoiceDialog = ({ invoice, onClose }) => {
 
           <div className="avoid-break" style={{ fontSize: 11, color: INVOICE_MUTED, marginTop: -4, marginBottom: 6 }}>
             <div>
-              <span style={{ color: INVOICE_TEXT, fontWeight: 600 }}>Session:</span>{" "}
+              <span style={{ color: INVOICE_TEXT, fontWeight: INVOICE_WEIGHT.subheading }}>Session:</span>{" "}
               {start?.toLocaleString()} → {end?.toLocaleString()} ({durMin} min billed)
             </div>
             <div style={{ marginTop: 2 }}>
-              <span style={{ color: INVOICE_TEXT, fontWeight: 600 }}>Hours:</span>{" "}
+              <span style={{ color: INVOICE_TEXT, fontWeight: INVOICE_WEIGHT.subheading }}>Hours:</span>{" "}
               {sessionDetails?.totalHours || 1} total · {sessionDetails?.extensionHours || 0} extension · {sessionDetails?.pauseTimeMinutes || 0} min pause
             </div>
           </div>
@@ -2135,10 +2198,10 @@ const InvoiceDialog = ({ invoice, onClose }) => {
                 alignItems: "center",
               }}
             >
-              <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: INVOICE_ACCENT }}>
+              <span style={{ fontSize: 12.5, fontWeight: INVOICE_WEIGHT.heading, letterSpacing: 0.4, textTransform: "uppercase", color: INVOICE_ACCENT }}>
                 Grand Total
               </span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: INVOICE_ACCENT }}>{formatCurrency(charges?.grandTotal || 0)}</span>
+              <span style={{ fontSize: 18, fontWeight: INVOICE_WEIGHT.grandTotal, color: INVOICE_ACCENT }}>{formatCurrency(charges?.grandTotal || 0)}</span>
             </div>
           </div>
 
@@ -2477,14 +2540,14 @@ function SessionsPage() {
     }
   };
 
-  const extendHour = async (b) => {
+  const extendHour = async (b, durationMinutes = 60) => {
     try {
       await axios.patch(
         `${import.meta.env.VITE_API_URL}/session/extend/${b._id}`,
-        {},
+        { durationMinutes },
         { withCredentials: true },
       );
-      toast.success("Extended by 1 hour");
+      toast.success(durationMinutes === 30 ? "Extended by 30 minutes" : "Extended by 1 hour");
       await loadSessions();
     } catch (error) {
       console.log(error);
@@ -2552,7 +2615,7 @@ function SessionsPage() {
                 onResume={() => resume(b)}
                 onCheckout={() => checkout(b)}
                 onStart={() => startSession(b)}
-                onExtend={() => extendHour(b)}
+                onExtend={(minutes) => extendHour(b, minutes)}
                 onPauseChild={(index) => pauseChild(b, index)}
                 onResumeChild={(index) => resumeChild(b, index)}
                 onSettlePayment={(method) => settlePayment(b, method)}
@@ -2592,7 +2655,7 @@ function SessionsPage() {
                 onResume={() => resume(b)}
                 onCheckout={() => checkout(b)}
                 onStart={() => startSession(b)}
-                onExtend={() => extendHour(b)}
+                onExtend={(minutes) => extendHour(b, minutes)}
                 onPauseChild={(index) => pauseChild(b, index)}
                 onResumeChild={(index) => resumeChild(b, index)}
                 onSettlePayment={(method) => settlePayment(b, method)}

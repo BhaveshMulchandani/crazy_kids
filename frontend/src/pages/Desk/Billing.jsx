@@ -502,13 +502,12 @@ function BillingPage() {
 
       // Socks Required is optional (defaults to 0 — a group doesn't have to
       // need socks at all), but if entered it must be a valid, non-negative
-      // count that doesn't exceed the group's total headcount.
+      // count. No upper bound tied to headcount — a group may need more
+      // pairs of socks than registered kids.
       if (groupSocksRequired !== "") {
         const socks = Number(groupSocksRequired);
         if (!Number.isInteger(socks) || socks < 0) {
           nextErrors.groupSocksRequired = "Socks required must be a whole number and cannot be negative";
-        } else if (!nextErrors.groupTotalChildren && socks > total) {
-          nextErrors.groupSocksRequired = "Socks required cannot be greater than the total number of children";
         }
       }
     } else {
@@ -1079,7 +1078,6 @@ function BillingPage() {
                   <Input
                     type="number"
                     min="0"
-                    max={groupTotalChildren || undefined}
                     value={groupSocksRequired}
                     onChange={(e) => {
                       setGroupSocksRequired(e.target.value);

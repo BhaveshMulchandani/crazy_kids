@@ -198,6 +198,20 @@ const sessionSchema = new mongoose.Schema(
       default: false,
     },
 
+    // Overrides the per-child socksOpted headcount for a normal (non-group)
+    // booking once an operator explicitly sets a socks quantity — lets socks
+    // be billed independently of how many children are on the session (e.g.
+    // 6 pairs for a 4-kid booking). null/undefined (the default, and every
+    // session created before this field existed) means "no override, keep
+    // deriving the count from children.socksOpted" (see billing.service.js).
+    // Group bookings are unaffected — they already have their own headcount
+    // field, groupBooking.socksRequired.
+    socksQuantity: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
+
     notes: {
       type: String,
       default: "",

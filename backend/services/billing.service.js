@@ -171,10 +171,17 @@ const calculateInvoiceCharges = async ({ session, settings, kots, extraDiscount,
   const membershipPurchase = session.membershipPurchase || null;
   const membershipPurchaseTotal = Number(membershipPurchase?.price || 0);
   // A group booking has no per-child socksOpted flags to count — it collects
-  // a single "how many socks does the group need" headcount instead.
+  // a single "how many socks does the group need" headcount instead. A
+  // normal booking's count is per-child socksOpted *unless* the operator has
+  // explicitly set an override quantity (session.socksQuantity) — e.g. 6
+  // pairs of socks for a 4-kid booking — in which case that override is the
+  // authoritative count. null/undefined (incl. every session created before
+  // this field existed) falls back to the per-child count unchanged.
   const socksQty = groupBooking
     ? Number(groupBooking.socksRequired || 0)
-    : children.filter((child) => child.socksOpted).length;
+    : session.socksQuantity != null
+      ? Number(session.socksQuantity)
+      : children.filter((child) => child.socksOpted).length;
   const socksRate = Number(settings?.socksCost || 0);
   const socksTotal = round(socksQty * socksRate);
   const preDiscountGrandTotal = round(sessionTotal + cafeTotal + membershipPurchaseTotal + socksTotal);
