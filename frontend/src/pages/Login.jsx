@@ -1,6 +1,6 @@
 import { useState } from "react";
 // import { Sparkles } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -165,12 +165,21 @@ export default function Login() {
 
             {/* Password */}
             <div className="space-y-2">
-              <label
-                htmlFor="password"
-                className="text-sm font-medium text-slate-700"
-              >
-                Password
-              </label>
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="password"
+                  className="text-sm font-medium text-slate-700"
+                >
+                  Password
+                </label>
+
+                <Link
+                  to="/forgot-password"
+                  className="text-sm font-medium text-slate-500 underline-offset-4 hover:text-slate-950 hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
 
               <input
                 id="password"

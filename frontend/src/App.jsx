@@ -3,6 +3,8 @@ import Adminlayout from "./components/Layout/Adminlayout";
 import Desklayout from "./components/Layout/Desklayout";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Admin/Dashboard";
 import MembershipDashboard from "./pages/Desk/MembershipDashboard";
 import Billing from "./pages/Desk/Billing";
@@ -20,6 +22,8 @@ const App = () => {
     <Routes>
       <Route path="/" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route path="/admin" element={<Adminlayout />}>
       <Route path="dashboard" element={<Dashboard/>} />

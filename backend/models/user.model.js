@@ -15,6 +15,14 @@ const userschema = new mongoose.Schema({
         type:String,
         enum:["admin","desk"],
         default:"desk"
+    },
+    resetPasswordTokenHash:{
+        type:String,
+        default:null
+    },
+    resetPasswordExpires:{
+        type:Date,
+        default:null
     }
 })
 

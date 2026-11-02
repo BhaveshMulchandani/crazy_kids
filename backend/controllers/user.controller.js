@@ -1,7 +1,11 @@
 const usermodel = require("../models/user.model")
 const bcrypt = require("bcryptjs")
 const jwt = require("jsonwebtoken")
+const crypto = require("crypto")
 const { COOKIE_NAMES, TOKEN_TTL_MS } = require("../middlewares/user.middleware")
+const { sendPasswordResetEmail } = require("../services/email.service")
+
+const RESET_TOKEN_TTL_MS = 15 * 60 * 1000
 
 const register = async (req, res) => {
 
@@ -120,9 +124,126 @@ const admin = async (req, res) => {
     }
 }
 
+const forgotPassword = async (req, res) => {
+
+    const { email } = req.body
+
+    if (!email) {
+        return res.status(400).json({ message: "Please provide an email address" })
+    }
+
+    // Always the same response, whether or not the email is registered —
+    // never reveal account existence through this endpoint.
+    const genericResponse = { message: "If that email is registered, a password reset link has been sent." }
+
+    try {
+        const user = await usermodel.findOne({ email })
+
+        if (user) {
+            const rawToken = crypto.randomBytes(32).toString("hex")
+            const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex")
+
+            user.resetPasswordTokenHash = tokenHash
+            user.resetPasswordExpires = new Date(Date.now() + RESET_TOKEN_TTL_MS)
+            await user.save()
+
+            const resetUrl = `${process.env.FRONTEND_URL}/#/reset-password?token=${rawToken}`
+
+            try {
+                await sendPasswordResetEmail({ to: user.email, resetUrl })
+            } catch (emailError) {
+                // Logged for ops visibility only — swallowed so an SMTP outage
+                // can't be used to probe which emails are registered.
+                console.error("[user.controller] forgotPassword: failed to send reset email", emailError.message)
+            }
+        }
+
+        return res.status(200).json(genericResponse)
+
+    } catch (err) {
+        console.error("[user.controller] forgotPassword error", err.message)
+        return res.status(200).json(genericResponse)
+    }
+}
+
+const verifyResetToken = async (req, res) => {
+
+    const { token } = req.body
+
+    if (!token) {
+        return res.status(400).json({ message: "Reset token is required" })
+    }
+
+    try {
+        const tokenHash = crypto.createHash("sha256").update(token).digest("hex")
+
+        const user = await usermodel.findOne({
+            resetPasswordTokenHash: tokenHash,
+            resetPasswordExpires: { $gt: new Date() }
+        })
+
+        if (!user) {
+            return res.status(400).json({ message: "This reset link is invalid or has expired" })
+        }
+
+        return res.status(200).json({ message: "Token is valid" })
+
+    } catch (err) {
+        return res.status(500).json({ message: "Server error", error: err.message })
+    }
+}
+
+const resetPassword = async (req, res) => {
+
+    const { token, password, confirmPassword } = req.body
+
+    if (!token || !password || !confirmPassword) {
+        return res.status(400).json({ message: "Please fill all the fields" })
+    }
+
+    if (password !== confirmPassword) {
+        return res.status(400).json({ message: "Passwords do not match" })
+    }
+
+    if (password.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters" })
+    }
+
+    try {
+        const tokenHash = crypto.createHash("sha256").update(token).digest("hex")
+
+        const user = await usermodel.findOne({
+            resetPasswordTokenHash: tokenHash,
+            resetPasswordExpires: { $gt: new Date() }
+        })
+
+        if (!user) {
+            return res.status(400).json({ message: "This reset link is invalid or has expired" })
+        }
+
+        const salt = await bcrypt.genSalt(10)
+        user.password = await bcrypt.hash(password, salt)
+
+        // Single-use: invalidate the token immediately so the same link
+        // can't reset the password a second time.
+        user.resetPasswordTokenHash = null
+        user.resetPasswordExpires = null
+
+        await user.save()
+
+        return res.status(200).json({ message: "Password has been reset successfully" })
+
+    } catch (err) {
+        return res.status(500).json({ message: "Server error", error: err.message })
+    }
+}
+
 module.exports = {
     register,
     login,
     logout,
-    admin
+    admin,
+    forgotPassword,
+    verifyResetToken,
+    resetPassword
 }
